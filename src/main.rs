@@ -36,6 +36,7 @@ fn main() -> std::io::Result<()> {
 
     let mut depth_in_match: usize = 0;
     let mut output_buffer: Vec<u8> = Vec::with_capacity(1024 * 64);
+    let mut temp_buf = [0u8; 4096];
 
     loop {
         let ev = pp.next_event()?;
@@ -44,7 +45,7 @@ fn main() -> std::io::Result<()> {
             EventType::StartElement => {
                 if depth_in_match > 0 {
                     // Inside match: accumulate nested element
-                    write_event_to_buffer(&ev, &mut output_buffer);
+                    write_event_to_buffer(&ev, &mut output_buffer, &mut temp_buf);
                     depth_in_match += 1;
                 } else if ev.data == element_name_bytes {
                     if let Some((k,v)) = ev.attributes.get(0) {
@@ -53,7 +54,7 @@ fn main() -> std::io::Result<()> {
                             depth_in_match = 1;
                             match_counter += 1;
                             output_buffer.clear();
-                            write_event_to_buffer(&ev, &mut output_buffer);
+                            write_event_to_buffer(&ev, &mut output_buffer, &mut temp_buf);
                         }
                     }
                 }
@@ -61,7 +62,7 @@ fn main() -> std::io::Result<()> {
 
             EventType::EndElement => {
                 if depth_in_match > 0 {
-                    write_event_to_buffer(&ev, &mut output_buffer);
+                    write_event_to_buffer(&ev, &mut output_buffer, &mut temp_buf);
                     depth_in_match -= 1;
 
                     if depth_in_match == 0 {
@@ -77,7 +78,7 @@ fn main() -> std::io::Result<()> {
             | EventType::CData
             | EventType::ProcessingInstruction => {
                 if depth_in_match > 0 {
-                    write_event_to_buffer(&ev, &mut output_buffer);
+                    write_event_to_buffer(&ev, &mut output_buffer, &mut temp_buf);
                 }
             }
 
@@ -184,12 +185,11 @@ impl<'a> FormattableEvent for Event<'a> {
     }
 }
 
-fn write_event_to_buffer(event: &Event, buffer: &mut Vec<u8>) {
+fn write_event_to_buffer(event: &Event, buffer: &mut Vec<u8>, temp_buf: &mut [u8]) {
     match event.event_type {
         EventType::StartElement => {
             // Try using write_start_element with temp buffer
-            let mut temp_buf = [0u8; 4096];
-            match event.write_start_element(&mut temp_buf) {
+            match event.write_start_element(temp_buf) {
                 Ok(len) => buffer.extend_from_slice(&temp_buf[0..len]),
                 Err(_) => {
                     // Fallback: build manually for oversized elements

@@ -1,4 +1,5 @@
 // Tokenizer primitives and state machine helpers.
+use memchr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -28,19 +29,18 @@ impl Default for State {
 }
 
 /// Find the first occurrence of `needle` inside `haystack` and return the
-/// byte index, or `None` if not found. Simple non-optimized implementation
-/// suitable for tests and initial tokenizer logic.
+/// byte index, or `None` if not found. Uses memchr for SIMD-accelerated search.
 pub fn find_sequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() {
         return Some(0);
     }
     if needle.len() == 1 {
-        return haystack.iter().position(|&b| b == needle[0]);
+        return memchr::memchr(needle[0], haystack);
     }
     if needle.len() > haystack.len() {
         return None;
     }
-    haystack.windows(needle.len()).position(|w| w == needle)
+    memchr::memmem::find(haystack, needle)
 }
 
 /// Scan a name from the start of `buf` returning the length of the name and

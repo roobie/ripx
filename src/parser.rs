@@ -5,6 +5,7 @@ use crate::input_buffer::InputBuffer;
 use crate::scratch::ScratchBuffers;
 use crate::tokenizer::scan_name;
 use std::io;
+use memchr;
 
 /// Public parser limits (see ParserV2.md)
 #[derive(Debug, Clone)]
@@ -178,7 +179,7 @@ impl<R: io::Read> Parser<R> {
         }
 
         // find next '<'
-        if let Some(i) = buf.iter().position(|&b| b == b'<') {
+        if let Some(i) = memchr::memchr(b'<', buf) {
             if i > 0 {
                 // emit text before tag
                 self.scratch.text.clear();
@@ -230,16 +231,16 @@ impl<R: io::Read> Parser<R> {
                 let rest = &buf[2..];
                 let (nlen, _delim) = scan_name(rest, self._limits.max_name_len);
                 // find closing '>'
-                if let Some(gt) = rest.iter().position(|&b| b == b'>') {
-                    // Copy the end-tag name into a local buffer so we don't disturb scratch.name
-                    let end_name = rest[..nlen].to_vec();
+                if let Some(gt) = memchr::memchr(b'>', rest) {
+                    // Use slice directly instead of allocating Vec
+                    let end_name = &rest[..nlen];
                     let consumed = 2 + gt + 1; // </ + name .. >
 
                     // If there's no open element to match, return EndElement (preserve prior behavior).
                     if self.elem_stack.len() == 0 {
                         // Append the parsed end-name into scratch.name so we can return a reference
                         let start = self.scratch.name.len();
-                        let (copied, _truncated) = self.scratch.push_name(&end_name);
+                        let (copied, _truncated) = self.scratch.push_name(end_name);
                         let data_slice = &self.scratch.name[start..start + copied];
                         self.input.consume(consumed);
                         let attrs = Attributes::from_parts(
@@ -261,7 +262,7 @@ impl<R: io::Read> Parser<R> {
                     let start = top.name_start;
                     let end = start + top.name_len;
                     let open_name = &self.scratch.name[start..end];
-                    if open_name != end_name.as_slice() {
+                    if open_name != end_name {
                         // mismatched end name -> OrphanedEndElement fault
                         let payload: &[u8];
                         if self._limits.include_fault_payload {
@@ -279,7 +280,7 @@ impl<R: io::Read> Parser<R> {
                             if b2.is_empty() {
                                 break;
                             }
-                            if let Some(pos) = b2.iter().position(|&c| c == b'<') {
+                            if let Some(pos) = memchr::memchr(b'<', b2) {
                                 if pos > 0 {
                                     self.input.consume(pos);
                                 }
@@ -375,7 +376,7 @@ impl<R: io::Read> Parser<R> {
                             if b2.is_empty() {
                                 break;
                             }
-                            if let Some(pos) = b2.iter().position(|&c| c == b'<') {
+                            if let Some(pos) = memchr::memchr(b'<', b2) {
                                 if pos > 0 {
                                     self.input.consume(pos);
                                 }
