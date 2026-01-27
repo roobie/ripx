@@ -7,12 +7,17 @@
 - Support simple, fast queries (e.g. `//item`, `/root/items/item`) and callbacks for matched subtrees.
 - Minimal XML features initially: start/end elements, attributes, text, comments, CDATA.
 - Robust best‑effort error handling: skip malformed regions and attempt to recover and continue.
+- Minimal decoding in the parser - operate on bytes directly - not UTF8
 
 ## Features (MVP)
 - Streaming reader that emits events: StartElement, EndElement, Text, Comment, CData, Eof.
 - Simple attribute parsing; parser now emits raw bytes for textual payloads and does not decode entities (consumers must decode).
 - Path stack + small query language: Anywhere (`//name`) and Absolute (`/a/b/c`) selectors.
 - Designed to be single‑pass and able to handle huge files.
+
+## Task tracking
+
+**IMPORTANT**: This project manages tasks using the beans CLI. All contributors and automated agents are required to run `beans prime` and follow the directives it prints (create and update beans for work, include bean files in commits, and update statuses as work progresses).
 
 ## Quickstart (development)
 Build and run tests with Rust/Cargo:
@@ -31,12 +36,11 @@ ripx large-file.xml --path "//item" --attr-eq-id="12345" --short-circuit
 See PLAN.md for the implementation plan. Main modules will include:
 - src/lib.rs
 - src/reader.rs (streaming reader)
-- src/tokenizer.rs (byte scanner)
 - src/query.rs (selectors + path stack)
 - src/main.rs (CLI / entry point for main binary)
 
 ## Future features
-- Parallel reading of input file
+- Parallel reading of input file (might require two-pass or the below indexing)
 - Indexing to improve performance
 
 ## License

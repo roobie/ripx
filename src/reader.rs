@@ -566,6 +566,42 @@ mod tests {
         }
     }
 
+    fn test_broken(xml: &str) {
+        let ev = events_from(xml);
+        assert_eq!(ev.len(), 2);
+        match &ev[1] {
+            Event::EndElement { accumulated, .. } => {
+                assert_eq!(
+                    String::from_utf8_lossy(accumulated),
+                    String::from_utf8_lossy(xml.as_bytes())
+                )
+            }
+            _ => panic!("expected EndElement"),
+        }
+    }
+
+    #[test]
+    fn broken_tag_recovery_1() {
+        let xml = "<root><broken</root>";
+        test_broken(xml);
+    }
+
+    #[test]
+    fn broken_tag_recovery_2() {
+        let xml = "<root><broken a</root>";
+        test_broken(xml);
+    }
+    #[test]
+    fn broken_tag_recovery_3() {
+        let xml = "<root><broken a=</root>";
+        test_broken(xml);
+    }
+    #[test]
+    fn broken_tag_recovery_4() {
+        let xml = "<root><broken a=\"</root>";
+        test_broken(xml);
+    }
+
     #[test]
     fn single_empty_element_no_attrs() {
         let xml = "<root></root>";
