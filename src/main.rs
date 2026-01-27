@@ -34,64 +34,66 @@ fn main() -> std::io::Result<()> {
     // pp=pull parser
     let mut pp = ripx::parser::Parser::new(reader, limits);
 
-    // accumulator for "current element of interest"
-    let mut acc: Vec<u8> = Vec::with_capacity(1024 * 64);
-    let mut collect_data = false;
+    let mut depth_in_match: usize = 0;
+    let mut output_buffer: Vec<u8> = Vec::with_capacity(1024 * 64);
+
     loop {
         let ev = pp.next_event()?;
-        // print!("{:?}|", ev.event_type);
-        // println!("{}", String::from_utf8_lossy(ev.data));
+
         match ev.event_type {
             EventType::StartElement => {
-                if ev.data != element_name_bytes {
-                    continue;
-                }
-                collect_data = true;
-                // we are in an element of interest
-                match_counter += 1;
-                // Caller can put out on the stack (e.g.
-                let mut buf = [0u8; 1024];
-                let len = ev.write_start_element(&mut buf).unwrap();
-                println!("{}", String::from_utf8_lossy(&buf[0..len]));
-            }
-            EventType::Text => {
-                if !collect_data {
-                    continue;
-                }
-                let trimmed = trim_ascii_whitespace(ev.data);
-                if trimmed.len() > 0 {
-                    println!("[{}]", String::from_utf8_lossy(ev.data));
+                if depth_in_match > 0 {
+                    // Inside match: accumulate nested element
+                    write_event_to_buffer(&ev, &mut output_buffer);
+                    depth_in_match += 1;
+                } else if ev.data == element_name_bytes {
+                    if let Some((k,v)) = ev.attributes.get(0) {
+                        if k == b"id" && v == b"20121624" {
+                            // New match found
+                            depth_in_match = 1;
+                            match_counter += 1;
+                            output_buffer.clear();
+                            write_event_to_buffer(&ev, &mut output_buffer);
+                        }
+                    }
                 }
             }
+
             EventType::EndElement => {
-                if !collect_data {
-                    continue;
+                if depth_in_match > 0 {
+                    write_event_to_buffer(&ev, &mut output_buffer);
+                    depth_in_match -= 1;
+
+                    if depth_in_match == 0 {
+                        // Exited top-level match: print accumulated XML
+                        println!("{}", String::from_utf8_lossy(&output_buffer));
+                        output_buffer.clear();
+                    }
                 }
-                println!("</{}>", String::from_utf8_lossy(ev.data));
             }
+
+            EventType::Text
+            | EventType::Comment
+            | EventType::CData
+            | EventType::ProcessingInstruction => {
+                if depth_in_match > 0 {
+                    write_event_to_buffer(&ev, &mut output_buffer);
+                }
+            }
+
             EventType::Fault => {
                 println!("FAULT: {:?} {}", ev.error, String::from_utf8_lossy(ev.data));
             }
-            _ => {
+
+            EventType::Eof => {
                 break;
             }
-        };
+        }
     }
 
-    Ok(())
-}
+    println!("Found {} matches", match_counter);
 
-fn trim_ascii_whitespace(data: &[u8]) -> &[u8] {
-    let start = data
-        .iter()
-        .position(|b| !b.is_ascii_whitespace())
-        .unwrap_or(data.len()); // all whitespace
-    let end = data
-        .iter()
-        .rposition(|b| !b.is_ascii_whitespace())
-        .map(|i| i + 1)
-        .unwrap_or(start);
-    &data[start..end]
+    Ok(())
 }
 
 trait FormattableEvent {
@@ -179,5 +181,56 @@ impl<'a> FormattableEvent for Event<'a> {
             }
             _ => Err("Not a start element"),
         }
+    }
+}
+
+fn write_event_to_buffer(event: &Event, buffer: &mut Vec<u8>) {
+    match event.event_type {
+        EventType::StartElement => {
+            // Try using write_start_element with temp buffer
+            let mut temp_buf = [0u8; 4096];
+            match event.write_start_element(&mut temp_buf) {
+                Ok(len) => buffer.extend_from_slice(&temp_buf[0..len]),
+                Err(_) => {
+                    // Fallback: build manually for oversized elements
+                    buffer.push(b'<');
+                    buffer.extend_from_slice(event.data);
+                    let mut i = 0;
+                    while let Some((name, value)) = event.attributes.get(i) {
+                        buffer.push(b' ');
+                        buffer.extend_from_slice(name);
+                        buffer.extend_from_slice(b"=\"");
+                        buffer.extend_from_slice(value);
+                        buffer.push(b'"');
+                        i += 1;
+                    }
+                    buffer.push(b'>');
+                }
+            }
+        }
+        EventType::EndElement => {
+            buffer.extend_from_slice(b"</");
+            buffer.extend_from_slice(event.data);
+            buffer.push(b'>');
+        }
+        EventType::Text => {
+            buffer.extend_from_slice(event.data);
+        }
+        EventType::Comment => {
+            buffer.extend_from_slice(b"<!--");
+            buffer.extend_from_slice(event.data);
+            buffer.extend_from_slice(b"-->");
+        }
+        EventType::CData => {
+            buffer.extend_from_slice(b"<![CDATA[");
+            buffer.extend_from_slice(event.data);
+            buffer.extend_from_slice(b"]]>");
+        }
+        EventType::ProcessingInstruction => {
+            buffer.extend_from_slice(b"<?");
+            buffer.extend_from_slice(event.data);
+            buffer.extend_from_slice(b"?>");
+        }
+        _ => {} // Fault, Eof
     }
 }

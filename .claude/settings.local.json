@@ -1,15 +1,30 @@
 {
-    "permissions": {
-        "allow": [
-            "Bash(cargo test:*)"
+  "permissions": {
+    "allow": [
+      "Bash(cargo test:*)",
+      "Bash(cargo check:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "beans prime"
+          }
         ]
-    }
-    ,  "hooks": {
-        "SessionStart": [
-            { "hooks": [{ "type": "command", "command": "beans prime" }] }
-        ],
-        "PreCompact": [
-            { "hooks": [{ "type": "command", "command": "beans prime" }] }
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "beans prime"
+          }
         ]
-    }
+      }
+    ]
+  }
 }
