@@ -556,6 +556,18 @@ mod tests {
     }
 
     #[test]
+    fn simple_accumulator() {
+        let xml = "<root></root>";
+        let ev = events_from(xml);
+        assert_eq!(ev.len(), 2);
+        match &ev[1] {
+            Event::EndElement { name, accumulated } => assert_eq!(accumulated, xml),
+            _ => panic!("expected EndElement"),
+        }
+    }
+
+
+    #[test]
     fn single_empty_element_no_attrs() {
         let xml = "<root></root>";
         let ev = events_from(xml);
