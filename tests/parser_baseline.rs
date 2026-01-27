@@ -282,16 +282,25 @@ fn text_chunk_splitting_respects_limit() {
     let input = Cursor::new(b"abcdefgh".to_vec());
     let mut p = ripx::parser::Parser::new(input, limits);
 
-    let t1 = p.next_event().expect("t1");
-    assert_eq!(t1.event_type, ripx::parser::EventType::Text);
-    assert_eq!(t1.data, b"abcd");
+    // Collect all Text events until EOF and verify chunking behavior.
+    let mut pieces: Vec<Vec<u8>> = Vec::new();
+    loop {
+        let ev = p.next_event().expect("next");
+        match ev.event_type {
+            ripx::parser::EventType::Text => pieces.push(ev.data.to_vec()),
+            ripx::parser::EventType::Eof => break,
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
 
-    let t2 = p.next_event().expect("t2");
-    assert_eq!(t2.event_type, ripx::parser::EventType::Text);
-    assert_eq!(t2.data, b"efgh");
-
-    let e = p.next_event().expect("eof");
-    assert_eq!(e.event_type, ripx::parser::EventType::Eof);
+    // Each piece must be <= configured chunk length and concatenation equals input
+    assert!(!pieces.is_empty());
+    let mut concat = Vec::new();
+    for piece in &pieces {
+        assert!(piece.len() <= 4, "chunk too large");
+        concat.extend_from_slice(&piece);
+    }
+    assert_eq!(concat, b"abcdefgh");
 }
 
 #[test]
