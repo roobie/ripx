@@ -84,7 +84,6 @@ pub struct PathQuery {
     buf: String,        // collect text for one match
     printed: usize,     // how many matches printed so far
     max: usize,         // stop after this many
-    count: usize,       // count accumulated matches
     done: bool,
     // attrs: Vec<(String, String)>
 }
@@ -98,7 +97,6 @@ impl PathQuery {
             buf: String::new(),
             printed: 0,
             max,
-            count: 0,
             done: false,
         }
     }

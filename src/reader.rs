@@ -136,19 +136,20 @@ impl<R: BufRead> Reader<R> {
                         return Ok(Event::Eof);
                     }
                     self.pos += 1; // consume '<'
-                    self.accumulator = vec![b'<'];
+                    self.accumulator.push(b'<');
                     self.state = State::InsideTag;
                 }
                 State::InsideTag => {
                     let c = self.peek_byte()?;
-                    self.accumulator.push(c);
                     match c {
                         b'/' => {
                             self.pos += 1; // consume '/'
+                            self.accumulator.push(c);
                             let name = self.read_name()?;
                             self.accumulator.append(name.as_bytes().to_vec().as_mut());
                             self.skip_spaces()?;
                             self.expect_byte(b'>')?;
+                            self.accumulator.push(b'>');
                             self.state = State::OutsideTag;
                             return Ok(Event::EndElement {
                                 name,
@@ -157,28 +158,36 @@ impl<R: BufRead> Reader<R> {
                         }
                         b'!' => {
                             self.pos += 1; // consume '!'
+                            self.accumulator.push(c);
                             if self.try_consume(b"--")? {
                                 let comment = self.read_until_bytes(b"-->")?;
+                                self.accumulator
+                                    .append(comment.as_bytes().to_vec().as_mut());
                                 self.state = State::OutsideTag;
                                 return Ok(Event::Comment(comment));
                             } else if self.try_consume(b"[CDATA[")? {
                                 let cdata = self.read_until_bytes(b"]]>")?;
+                                self.accumulator.append(cdata.as_bytes().to_vec().as_mut());
                                 self.state = State::OutsideTag;
                                 return Ok(Event::CData(cdata));
                             } else {
                                 self.skip_until_byte(b'>')?;
+                                self.accumulator.push(b'>');
                                 self.state = State::OutsideTag;
                                 continue;
                             }
                         }
                         b'?' => {
                             self.pos += 1; // consume '?'
+                            self.accumulator.push(c);
                             self.skip_until_bytes(b"?>")?;
+                            self.accumulator.push(b'>');
                             self.state = State::OutsideTag;
                             continue;
                         }
                         _ => {
                             let name = self.read_name()?;
+                            self.accumulator.append(name.as_bytes().to_vec().as_mut());
                             let mut attrs = Vec::new();
                             loop {
                                 self.skip_spaces()?;
@@ -188,6 +197,7 @@ impl<R: BufRead> Reader<R> {
                                         // empty element: <tag .../>
                                         self.pos += 1;
                                         self.expect_byte(b'>')?;
+                                        self.accumulator.push(b'>');
                                         self.state = State::OutsideTag;
 
                                         // Emit Start now, schedule End for next call
@@ -200,6 +210,7 @@ impl<R: BufRead> Reader<R> {
                                     b'>' => {
                                         self.pos += 1;
                                         self.state = State::OutsideTag;
+                                        self.accumulator.push(b'>');
                                         return Ok(Event::StartElement {
                                             name,
                                             attributes: attrs,
@@ -561,11 +572,10 @@ mod tests {
         let ev = events_from(xml);
         assert_eq!(ev.len(), 2);
         match &ev[1] {
-            Event::EndElement { name, accumulated } => assert_eq!(accumulated, xml),
+            Event::EndElement { accumulated, .. } => assert_eq!(accumulated, xml),
             _ => panic!("expected EndElement"),
         }
     }
-
 
     #[test]
     fn single_empty_element_no_attrs() {
