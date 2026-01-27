@@ -1,6 +1,6 @@
-use std::io::Cursor;
 use proptest::prelude::*;
-use ripx::parser::{Parser, ParserLimits, EventType};
+use ripx::parser::{EventType, Parser, ParserLimits};
+use std::io::Cursor;
 
 fn build_limits(
     max_depth: usize,
@@ -43,11 +43,31 @@ fn reconstruct_from_events(events: &[ripx::parser::Event<'_>]) -> Vec<u8> {
     for ev in events {
         match ev.event_type {
             EventType::Text => out.extend_from_slice(ev.data),
-            EventType::Comment => { out.extend_from_slice(b"<!--"); out.extend_from_slice(ev.data); out.extend_from_slice(b"-->"); }
-            EventType::EndElement => { out.extend_from_slice(b"</"); out.extend_from_slice(ev.data); out.extend_from_slice(b">"); }
-            EventType::StartElement => { out.extend_from_slice(b"<"); out.extend_from_slice(ev.data); out.extend_from_slice(b">"); }
-            EventType::CData => { out.extend_from_slice(b"<![CDATA["); out.extend_from_slice(ev.data); out.extend_from_slice(b"]]>"); }
-            EventType::ProcessingInstruction => { out.extend_from_slice(b"<?"); out.extend_from_slice(ev.data); out.extend_from_slice(b"?>"); }
+            EventType::Comment => {
+                out.extend_from_slice(b"<!--");
+                out.extend_from_slice(ev.data);
+                out.extend_from_slice(b"-->");
+            }
+            EventType::EndElement => {
+                out.extend_from_slice(b"</");
+                out.extend_from_slice(ev.data);
+                out.extend_from_slice(b">");
+            }
+            EventType::StartElement => {
+                out.extend_from_slice(b"<");
+                out.extend_from_slice(ev.data);
+                out.extend_from_slice(b">");
+            }
+            EventType::CData => {
+                out.extend_from_slice(b"<![CDATA[");
+                out.extend_from_slice(ev.data);
+                out.extend_from_slice(b"]]>");
+            }
+            EventType::ProcessingInstruction => {
+                out.extend_from_slice(b"<?");
+                out.extend_from_slice(ev.data);
+                out.extend_from_slice(b"?>");
+            }
             EventType::Fault | EventType::Eof => {}
         }
     }
@@ -125,12 +145,16 @@ proptest! {
 
 // check if 'needle' is a subsequence of 'haystack' (not necessarily contiguous)
 fn is_subsequence(needle: &[u8], haystack: &[u8]) -> bool {
-    if needle.is_empty() { return true; }
+    if needle.is_empty() {
+        return true;
+    }
     let mut i = 0usize;
     for &b in haystack {
         if b == needle[i] {
             i += 1;
-            if i == needle.len() { return true; }
+            if i == needle.len() {
+                return true;
+            }
         }
     }
     false

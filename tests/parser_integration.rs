@@ -29,7 +29,6 @@ fn parser_eof_placeholder() {
     assert_eq!(ev.event_type, EventType::Eof);
 }
 
-
 #[test]
 fn parser_1() {
     let data = b"<root></root>";
@@ -39,5 +38,4 @@ fn parser_1() {
     let ev = p.next_event().expect("next_event failed");
     assert_eq!(ev.event_type, EventType::StartElement);
     assert!(ev.data == b"root");
-
 }

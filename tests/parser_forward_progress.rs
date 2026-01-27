@@ -1,6 +1,7 @@
-use std::io::Cursor;
 use proptest::prelude::*;
-use ripx::parser::{Parser, ParserLimits, EventType};
+use proptest::test_runner::FileFailurePersistence;
+use ripx::parser::{EventType, Parser, ParserLimits};
+use std::io::Cursor;
 
 fn build_limits(
     max_depth: usize,
@@ -32,6 +33,12 @@ fn build_limits(
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        // Use Source (single file) instead of SourceParallel
+        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("proptest-regressions"))),
+        .. ProptestConfig::default()
+    })]
+
     #[test]
     fn forward_progress(
         bytes in proptest::collection::vec(any::<u8>(), 0..2048),

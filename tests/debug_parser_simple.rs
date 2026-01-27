@@ -1,5 +1,5 @@
-use std::io::Cursor;
 use ripx::parser::{Parser, ParserLimits};
+use std::io::Cursor;
 
 #[test]
 fn debug_simple_element() {
@@ -23,7 +23,12 @@ fn debug_simple_element() {
     let mut p = Parser::new(Cursor::new(bytes.clone()), limits);
     loop {
         let ev = p.next_event().expect("next");
-        println!("EVENT: {:?} error={:?} data={:?}", ev.event_type, ev.error, ev.data);
-        if ev.event_type == ripx::parser::EventType::Eof { break; }
+        println!(
+            "EVENT: {:?} error={:?} data={:?}",
+            ev.event_type, ev.error, ev.data
+        );
+        if ev.event_type == ripx::parser::EventType::Eof {
+            break;
+        }
     }
 }

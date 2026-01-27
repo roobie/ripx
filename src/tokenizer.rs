@@ -297,7 +297,13 @@ pub fn parse_attributes(
         // continue parsing
     }
 
-    (out, consumed, hit_limit, name_truncated_any, value_truncated_any)
+    (
+        out,
+        consumed,
+        hit_limit,
+        name_truncated_any,
+        value_truncated_any,
+    )
 }
 #[cfg(test)]
 mod tests {

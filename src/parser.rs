@@ -1,10 +1,10 @@
-use std::io;
+use crate::attributes::{AttributeTable, Attributes, InternalAttribute, NameBufferKind};
+use crate::element_stack::ElementFrame;
+use crate::element_stack::ElementStack;
 use crate::input_buffer::InputBuffer;
 use crate::scratch::ScratchBuffers;
-use crate::element_stack::ElementStack;
-use crate::attributes::{AttributeTable, Attributes, NameBufferKind, InternalAttribute};
-use crate::tokenizer::{scan_name};
-use crate::element_stack::ElementFrame;
+use crate::tokenizer::scan_name;
+use std::io;
 
 /// Public parser limits (see ParserV2.md)
 #[derive(Debug, Clone)]
@@ -63,7 +63,6 @@ pub struct Attribute<'a> {
     pub name: &'a [u8],
     pub value: &'a [u8],
 }
-
 
 pub struct Event<'a> {
     pub event_type: EventType,
@@ -128,10 +127,20 @@ impl<R: io::Read> Parser<R> {
         let _ = self.input.fill_from(&mut self._reader)?;
         // If there's a pending synthetic EndElement, emit it first.
         if let Some(frame) = self.pending_end.take() {
-            let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+            let attrs = Attributes::from_parts(
+                self.attr_table.as_slice(),
+                self.input.as_slice(),
+                &self.scratch,
+            );
             let start = frame.name_start;
             let end = start + frame.name_len;
-            return Ok(Event { event_type: EventType::EndElement, data: &self.scratch.name[start..end], is_continuation: false, error: None, attributes: attrs });
+            return Ok(Event {
+                event_type: EventType::EndElement,
+                data: &self.scratch.name[start..end],
+                is_continuation: false,
+                error: None,
+                attributes: attrs,
+            });
         }
         // Clean up scratch buffer to match current stack depth
         // This reclaims space from previously emitted events
@@ -141,11 +150,31 @@ impl<R: io::Read> Parser<R> {
             // EOF: if there are unclosed elements, emit a single UnclosedElement fault first
             if self.elem_stack.len() > 0 && !self.eof_fault_emitted {
                 self.eof_fault_emitted = true;
-                let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                return Ok(Event { event_type: EventType::Fault, data: &[], is_continuation: false, error: Some(ErrorCode::UnclosedElement), attributes: attrs });
+                let attrs = Attributes::from_parts(
+                    self.attr_table.as_slice(),
+                    self.input.as_slice(),
+                    &self.scratch,
+                );
+                return Ok(Event {
+                    event_type: EventType::Fault,
+                    data: &[],
+                    is_continuation: false,
+                    error: Some(ErrorCode::UnclosedElement),
+                    attributes: attrs,
+                });
             }
-            let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-            return Ok(Event { event_type: EventType::Eof, data: &[], is_continuation: false, error: None, attributes: attrs });
+            let attrs = Attributes::from_parts(
+                self.attr_table.as_slice(),
+                self.input.as_slice(),
+                &self.scratch,
+            );
+            return Ok(Event {
+                event_type: EventType::Eof,
+                data: &[],
+                is_continuation: false,
+                error: None,
+                attributes: attrs,
+            });
         }
 
         // find next '<'
@@ -153,23 +182,47 @@ impl<R: io::Read> Parser<R> {
             if i > 0 {
                 // emit text before tag
                 self.scratch.text.clear();
-                let rem = self.scratch.text.capacity().saturating_sub(self.scratch.text.len());
+                let rem = self
+                    .scratch
+                    .text
+                    .capacity()
+                    .saturating_sub(self.scratch.text.len());
                 let take = i.min(rem);
                 self.scratch.text.extend_from_slice(&buf[..take]);
                 // consume taken bytes
                 self.input.consume(take);
-                let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                return Ok(Event { event_type: EventType::Text, data: &self.scratch.text[..take], is_continuation: false, error: None, attributes: attrs });
+                let attrs = Attributes::from_parts(
+                    self.attr_table.as_slice(),
+                    self.input.as_slice(),
+                    &self.scratch,
+                );
+                return Ok(Event {
+                    event_type: EventType::Text,
+                    data: &self.scratch.text[..take],
+                    is_continuation: false,
+                    error: None,
+                    attributes: attrs,
+                });
             }
             // buf[0] == '<'
             if buf.starts_with(b"<!--") {
                 if let Some(len) = crate::tokenizer::consume_comment(buf) {
                     self.scratch.comment.clear();
-                    let inner = &buf[4..len-3];
+                    let inner = &buf[4..len - 3];
                     let _ = self.scratch.push_comment_chunk(inner);
                     self.input.consume(len);
-                    let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                    return Ok(Event { event_type: EventType::Comment, data: &self.scratch.comment[..], is_continuation: false, error: None, attributes: attrs });
+                    let attrs = Attributes::from_parts(
+                        self.attr_table.as_slice(),
+                        self.input.as_slice(),
+                        &self.scratch,
+                    );
+                    return Ok(Event {
+                        event_type: EventType::Comment,
+                        data: &self.scratch.comment[..],
+                        is_continuation: false,
+                        error: None,
+                        attributes: attrs,
+                    });
                 }
             }
             if buf.len() >= 2 && buf[1] == b'/' {
@@ -189,8 +242,18 @@ impl<R: io::Read> Parser<R> {
                         let (copied, _truncated) = self.scratch.push_name(&end_name);
                         let data_slice = &self.scratch.name[start..start + copied];
                         self.input.consume(consumed);
-                        let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                        return Ok(Event { event_type: EventType::EndElement, data: data_slice, is_continuation: false, error: None, attributes: attrs });
+                        let attrs = Attributes::from_parts(
+                            self.attr_table.as_slice(),
+                            self.input.as_slice(),
+                            &self.scratch,
+                        );
+                        return Ok(Event {
+                            event_type: EventType::EndElement,
+                            data: data_slice,
+                            is_continuation: false,
+                            error: None,
+                            attributes: attrs,
+                        });
                     }
 
                     // Compare end name to the top of the element stack
@@ -213,26 +276,54 @@ impl<R: io::Read> Parser<R> {
                         loop {
                             let _ = self.input.fill_from(&mut self._reader)?;
                             let b2 = self.input.as_slice();
-                            if b2.is_empty() { break; }
+                            if b2.is_empty() {
+                                break;
+                            }
                             if let Some(pos) = b2.iter().position(|&c| c == b'<') {
-                                if pos > 0 { self.input.consume(pos); }
+                                if pos > 0 {
+                                    self.input.consume(pos);
+                                }
                                 break;
                             } else {
-                                let n = b2.len(); self.input.consume(n);
+                                let n = b2.len();
+                                self.input.consume(n);
                             }
                         }
-                        let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                        return Ok(Event { event_type: EventType::Fault, data: payload, is_continuation: false, error: Some(ErrorCode::MismatchedEndElement), attributes: attrs });
+                        let attrs = Attributes::from_parts(
+                            self.attr_table.as_slice(),
+                            self.input.as_slice(),
+                            &self.scratch,
+                        );
+                        return Ok(Event {
+                            event_type: EventType::Fault,
+                            data: payload,
+                            is_continuation: false,
+                            error: Some(ErrorCode::MismatchedEndElement),
+                            attributes: attrs,
+                        });
                     }
 
                     // Names match: pop and emit EndElement
                     let f = self.elem_stack.pop().unwrap();
-                    let emit_frame = ElementFrame { name_start: f.name_start, name_len: f.name_len };
+                    let emit_frame = ElementFrame {
+                        name_start: f.name_start,
+                        name_len: f.name_len,
+                    };
                     self.input.consume(consumed);
-                    let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                    let attrs = Attributes::from_parts(
+                        self.attr_table.as_slice(),
+                        self.input.as_slice(),
+                        &self.scratch,
+                    );
                     let start = emit_frame.name_start;
                     let end = start + emit_frame.name_len;
-                    return Ok(Event { event_type: EventType::EndElement, data: &self.scratch.name[start..end], is_continuation: false, error: None, attributes: attrs });
+                    return Ok(Event {
+                        event_type: EventType::EndElement,
+                        data: &self.scratch.name[start..end],
+                        is_continuation: false,
+                        error: None,
+                        attributes: attrs,
+                    });
                 }
             }
             // start tag: '<name ...>' (not comment, not end, not PI/DOCTYPE)
@@ -242,8 +333,18 @@ impl<R: io::Read> Parser<R> {
                 if name_len == 0 {
                     // malformed; consume '<' and return it as text
                     self.input.consume(1);
-                    let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                    return Ok(Event { event_type: EventType::Text, data: b"<", is_continuation: false, error: None, attributes: attrs });
+                    let attrs = Attributes::from_parts(
+                        self.attr_table.as_slice(),
+                        self.input.as_slice(),
+                        &self.scratch,
+                    );
+                    return Ok(Event {
+                        event_type: EventType::Text,
+                        data: b"<",
+                        is_continuation: false,
+                        error: None,
+                        attributes: attrs,
+                    });
                 }
                 // If truncated by scan_name, advance to actual delimiter so trailing chars don't parse as attrs
                 let mut full_name_len = name_len;
@@ -271,35 +372,61 @@ impl<R: io::Read> Parser<R> {
                         loop {
                             let _ = self.input.fill_from(&mut self._reader)?;
                             let b2 = self.input.as_slice();
-                            if b2.is_empty() { break; }
+                            if b2.is_empty() {
+                                break;
+                            }
                             if let Some(pos) = b2.iter().position(|&c| c == b'<') {
-                                if pos > 0 { self.input.consume(pos); }
+                                if pos > 0 {
+                                    self.input.consume(pos);
+                                }
                                 break;
                             } else {
-                                let n = b2.len(); self.input.consume(n);
+                                let n = b2.len();
+                                self.input.consume(n);
                             }
                         }
-                        let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                        return Ok(Event { event_type: EventType::Fault, data: payload, is_continuation: false, error: Some(ErrorCode::NameTooLong), attributes: attrs });
+                        let attrs = Attributes::from_parts(
+                            self.attr_table.as_slice(),
+                            self.input.as_slice(),
+                            &self.scratch,
+                        );
+                        return Ok(Event {
+                            event_type: EventType::Fault,
+                            data: payload,
+                            is_continuation: false,
+                            error: Some(ErrorCode::NameTooLong),
+                            attributes: attrs,
+                        });
                     }
                 }
 
                 // parse attributes from the bytes after the name
                 let after_name = &rest[full_name_len..];
-                    let (parsed_attrs, consumed_attrs, hit_limit, name_trunc, value_trunc) = crate::tokenizer::parse_attributes(
-                    after_name,
-                    self._limits.max_attr_name_len,
-                    self._limits.max_attr_value_len,
-                    self._limits.max_attributes,
-                );
+                let (parsed_attrs, consumed_attrs, hit_limit, name_trunc, value_trunc) =
+                    crate::tokenizer::parse_attributes(
+                        after_name,
+                        self._limits.max_attr_name_len,
+                        self._limits.max_attr_value_len,
+                        self._limits.max_attributes,
+                    );
 
                 // If attributes parser didn't find a closing '>' or '/>', treat as text fallback.
                 // Note: parse_attributes may consume whitespace even when no attributes were parsed,
                 // so check parsed_attrs.is_empty() rather than consumed_attrs == 0.
-                if parsed_attrs.is_empty() && !after_name.iter().any(|&b| b == b'>' ) {
+                if parsed_attrs.is_empty() && !after_name.iter().any(|&b| b == b'>') {
                     self.input.consume(1);
-                    let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                    return Ok(Event { event_type: EventType::Text, data: b"<", is_continuation: false, error: None, attributes: attrs });
+                    let attrs = Attributes::from_parts(
+                        self.attr_table.as_slice(),
+                        self.input.as_slice(),
+                        &self.scratch,
+                    );
+                    return Ok(Event {
+                        event_type: EventType::Text,
+                        data: b"<",
+                        is_continuation: false,
+                        error: None,
+                        attributes: attrs,
+                    });
                 }
 
                 // total bytes to consume for the whole start tag
@@ -308,7 +435,11 @@ impl<R: io::Read> Parser<R> {
                 // If any attribute name or value was truncated by limits, emit appropriate Fault
                 if name_trunc || value_trunc {
                     // choose error code: prefer AttributeNameTooLong if name_trunc
-                    let err = if name_trunc { ErrorCode::AttributeNameTooLong } else { ErrorCode::AttributeValueTooLong };
+                    let err = if name_trunc {
+                        ErrorCode::AttributeNameTooLong
+                    } else {
+                        ErrorCode::AttributeValueTooLong
+                    };
                     let payload: &[u8];
                     if self._limits.include_fault_payload {
                         self.scratch.text.clear();
@@ -323,16 +454,31 @@ impl<R: io::Read> Parser<R> {
                     loop {
                         let _ = self.input.fill_from(&mut self._reader)?;
                         let b2 = self.input.as_slice();
-                        if b2.is_empty() { break; }
+                        if b2.is_empty() {
+                            break;
+                        }
                         if let Some(pos) = b2.iter().position(|&c| c == b'<') {
-                            if pos > 0 { self.input.consume(pos); }
+                            if pos > 0 {
+                                self.input.consume(pos);
+                            }
                             break;
                         } else {
-                            let n = b2.len(); self.input.consume(n);
+                            let n = b2.len();
+                            self.input.consume(n);
                         }
                     }
-                    let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                    return Ok(Event { event_type: EventType::Fault, data: payload, is_continuation: false, error: Some(err), attributes: attrs });
+                    let attrs = Attributes::from_parts(
+                        self.attr_table.as_slice(),
+                        self.input.as_slice(),
+                        &self.scratch,
+                    );
+                    return Ok(Event {
+                        event_type: EventType::Fault,
+                        data: payload,
+                        is_continuation: false,
+                        error: Some(err),
+                        attributes: attrs,
+                    });
                 }
 
                 // prepare attribute table and scratch areas
@@ -380,68 +526,137 @@ impl<R: io::Read> Parser<R> {
                     loop {
                         let _ = self.input.fill_from(&mut self._reader)?;
                         let b2 = self.input.as_slice();
-                        if b2.is_empty() { break; }
+                        if b2.is_empty() {
+                            break;
+                        }
                         if let Some(pos) = b2.iter().position(|&c| c == b'<') {
-                            if pos > 0 { self.input.consume(pos); }
+                            if pos > 0 {
+                                self.input.consume(pos);
+                            }
                             break;
                         } else {
-                            let n = b2.len(); self.input.consume(n);
+                            let n = b2.len();
+                            self.input.consume(n);
                         }
                     }
-                    let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                    return Ok(Event { event_type: EventType::Fault, data: payload, is_continuation: false, error: Some(ErrorCode::TooManyAttributes), attributes: attrs });
+                    let attrs = Attributes::from_parts(
+                        self.attr_table.as_slice(),
+                        self.input.as_slice(),
+                        &self.scratch,
+                    );
+                    return Ok(Event {
+                        event_type: EventType::Fault,
+                        data: payload,
+                        is_continuation: false,
+                        error: Some(ErrorCode::TooManyAttributes),
+                        attributes: attrs,
+                    });
                 }
 
                 // Determine if self-closing by looking at the consumed region
-                let tag_region = &buf[1 + full_name_len .. 1 + full_name_len + consumed_attrs];
+                let tag_region = &buf[1 + full_name_len..1 + full_name_len + consumed_attrs];
                 let self_closing = tag_region.ends_with(b"/>");
 
                 // push element name onto stack (copy into scratch.name)
                 // use the truncated name portion (name_len)
                 let name_bytes = &rest[..name_len];
-                match self.elem_stack.push_name(&mut self.scratch, name_bytes, self._limits.max_name_len) {
+                match self.elem_stack.push_name(
+                    &mut self.scratch,
+                    name_bytes,
+                    self._limits.max_name_len,
+                ) {
                     Ok(()) => {
                         // if self-closing, pop and save pending end
                         let frame = if self_closing {
                             // pop the pushed frame and keep a copy for emission
                             let f = self.elem_stack.pop().unwrap();
-                            let emit_frame = ElementFrame { name_start: f.name_start, name_len: f.name_len };
+                            let emit_frame = ElementFrame {
+                                name_start: f.name_start,
+                                name_len: f.name_len,
+                            };
                             self.pending_end = Some(f);
                             emit_frame
                         } else {
                             // copy top for event emission
                             let top = self.elem_stack.top().unwrap();
-                            ElementFrame { name_start: top.name_start, name_len: top.name_len }
+                            ElementFrame {
+                                name_start: top.name_start,
+                                name_len: top.name_len,
+                            }
                         };
                         // consume tag bytes
                         self.input.consume(total_consumed);
-                        let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                        let attrs = Attributes::from_parts(
+                            self.attr_table.as_slice(),
+                            self.input.as_slice(),
+                            &self.scratch,
+                        );
                         let start = frame.name_start;
                         let end = start + frame.name_len;
-                        return Ok(Event { event_type: EventType::StartElement, data: &self.scratch.name[start..end], is_continuation: false, error: None, attributes: attrs });
+                        return Ok(Event {
+                            event_type: EventType::StartElement,
+                            data: &self.scratch.name[start..end],
+                            is_continuation: false,
+                            error: None,
+                            attributes: attrs,
+                        });
                     }
                     Err(()) => {
                         // depth exceeded
                         self.input.consume(total_consumed);
-                        let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                        return Ok(Event { event_type: EventType::Fault, data: &[], is_continuation: false, error: Some(ErrorCode::DepthLimitExceeded), attributes: attrs });
+                        let attrs = Attributes::from_parts(
+                            self.attr_table.as_slice(),
+                            self.input.as_slice(),
+                            &self.scratch,
+                        );
+                        return Ok(Event {
+                            event_type: EventType::Fault,
+                            data: &[],
+                            is_continuation: false,
+                            error: Some(ErrorCode::DepthLimitExceeded),
+                            attributes: attrs,
+                        });
                     }
                 }
             }
             // Start tag or other: for now, treat as text delimiter and consume '<'
             // consume the '<' and return it as text
             self.input.consume(1);
-            let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-            return Ok(Event { event_type: EventType::Text, data: b"<", is_continuation: false, error: None, attributes: attrs });
+            let attrs = Attributes::from_parts(
+                self.attr_table.as_slice(),
+                self.input.as_slice(),
+                &self.scratch,
+            );
+            return Ok(Event {
+                event_type: EventType::Text,
+                data: b"<",
+                is_continuation: false,
+                error: None,
+                attributes: attrs,
+            });
         } else {
             // no '<' found, emit all as text
-            let rem = self.scratch.text.capacity().saturating_sub(self.scratch.text.len());
+            let rem = self
+                .scratch
+                .text
+                .capacity()
+                .saturating_sub(self.scratch.text.len());
             let take = buf.len().min(rem);
             self.scratch.text.clear();
             self.scratch.text.extend_from_slice(&buf[..take]);
             self.input.consume(take);
-            let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-            return Ok(Event { event_type: EventType::Text, data: &self.scratch.text[..take], is_continuation: false, error: None, attributes: attrs });
+            let attrs = Attributes::from_parts(
+                self.attr_table.as_slice(),
+                self.input.as_slice(),
+                &self.scratch,
+            );
+            return Ok(Event {
+                event_type: EventType::Text,
+                data: &self.scratch.text[..take],
+                is_continuation: false,
+                error: None,
+                attributes: attrs,
+            });
         }
     }
 }

@@ -1,6 +1,6 @@
-use std::io::Cursor;
 use proptest::prelude::*;
-use ripx::parser::{Parser, ParserLimits, EventType};
+use ripx::parser::{EventType, Parser, ParserLimits};
+use std::io::Cursor;
 
 #[derive(Clone, Debug)]
 enum Node {

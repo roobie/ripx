@@ -1,5 +1,5 @@
+use ripx::parser::{ErrorCode, EventType, Parser, ParserLimits};
 use std::io::Cursor;
-use ripx::parser::{Parser, ParserLimits, EventType, ErrorCode};
 
 #[test]
 fn debug_failing_input() {
@@ -23,7 +23,12 @@ fn debug_failing_input() {
     let mut p = Parser::new(Cursor::new(bytes.clone()), limits);
     for i in 0..10 {
         let ev = p.next_event().expect("next");
-        println!("EV {}: {:?} data={:?} err={:?}", i, ev.event_type, ev.data, ev.error);
-        if ev.event_type == EventType::Eof { break; }
+        println!(
+            "EV {}: {:?} data={:?} err={:?}",
+            i, ev.event_type, ev.data, ev.error
+        );
+        if ev.event_type == EventType::Eof {
+            break;
+        }
     }
 }

@@ -72,11 +72,17 @@ fn mismatched_end_element_fault() {
 
     let ev2 = p.next_event().expect("fault");
     assert_eq!(ev2.event_type, ripx::parser::EventType::Fault);
-    assert_eq!(ev2.error, Some(ripx::parser::ErrorCode::MismatchedEndElement));
+    assert_eq!(
+        ev2.error,
+        Some(ripx::parser::ErrorCode::MismatchedEndElement)
+    );
 
     // EOF should follow (unclosed 'a')
     let ev3 = p.next_event().expect("eof or unclosed");
-    assert!(ev3.event_type == ripx::parser::EventType::Eof || ev3.event_type == ripx::parser::EventType::Fault);
+    assert!(
+        ev3.event_type == ripx::parser::EventType::Eof
+            || ev3.event_type == ripx::parser::EventType::Fault
+    );
 }
 
 #[test]
@@ -177,7 +183,6 @@ fn comment_and_text_mixture() {
     assert_eq!(e.event_type, ripx::parser::EventType::Eof);
 }
 
-
 #[test]
 fn too_many_attributes_no_payload() {
     let mut limits = default_limits();
@@ -194,7 +199,6 @@ fn too_many_attributes_no_payload() {
     let ev2 = p.next_event().expect("eof");
     assert_eq!(ev2.event_type, ripx::parser::EventType::Eof);
 }
-
 
 #[test]
 fn too_many_attributes_with_payload() {
@@ -213,7 +217,6 @@ fn too_many_attributes_with_payload() {
     assert_eq!(ev2.event_type, ripx::parser::EventType::Eof);
 }
 
-
 #[test]
 fn name_too_long_no_payload() {
     let mut limits = default_limits();
@@ -230,7 +233,6 @@ fn name_too_long_no_payload() {
     let ev2 = p.next_event().expect("eof");
     assert_eq!(ev2.event_type, ripx::parser::EventType::Eof);
 }
-
 
 #[test]
 fn name_too_long_with_payload() {
@@ -402,7 +404,10 @@ fn processing_instruction_event() {
     let mut p = ripx::parser::Parser::new(input, limits);
 
     let ev = p.next_event().expect("pi");
-    assert_eq!(ev.event_type, ripx::parser::EventType::ProcessingInstruction);
+    assert_eq!(
+        ev.event_type,
+        ripx::parser::EventType::ProcessingInstruction
+    );
 }
 
 #[test]
@@ -415,10 +420,16 @@ fn unclosed_constructs_emit_faults_on_eof() {
     // consume until EOF
     while let Ok(ev) = p.next_event() {
         if ev.event_type == ripx::parser::EventType::Fault {
-            assert!(matches!(ev.error, Some(ripx::parser::ErrorCode::UnclosedElement) | Some(ripx::parser::ErrorCode::UnexpectedEof)));
+            assert!(matches!(
+                ev.error,
+                Some(ripx::parser::ErrorCode::UnclosedElement)
+                    | Some(ripx::parser::ErrorCode::UnexpectedEof)
+            ));
             break;
         }
-        if ev.event_type == ripx::parser::EventType::Eof { break; }
+        if ev.event_type == ripx::parser::EventType::Eof {
+            break;
+        }
     }
 
     // unclosed comment
@@ -429,6 +440,8 @@ fn unclosed_constructs_emit_faults_on_eof() {
             assert_eq!(ev.error, Some(ripx::parser::ErrorCode::UnexpectedEof));
             break;
         }
-        if ev.event_type == ripx::parser::EventType::Eof { break; }
+        if ev.event_type == ripx::parser::EventType::Eof {
+            break;
+        }
     }
 }
