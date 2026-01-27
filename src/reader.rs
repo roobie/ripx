@@ -319,7 +319,6 @@ impl<R: BufRead> Reader<R> {
                         if next == b'/' || next == b'!' || next == b'?' {
                             if matched > 0 {
                                 out.extend_from_slice(&pat[..matched]);
-                                matched = 0;
                             }
                             // step back so '<' is not consumed and can be reprocessed by caller
                             self.pos -= 1;
