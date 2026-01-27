@@ -61,6 +61,43 @@ fn end_element_event() {
 }
 
 #[test]
+fn mismatched_end_element_fault() {
+    let limits = default_limits();
+    let input = Cursor::new(b"<a></b>".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let ev1 = p.next_event().expect("start");
+    assert_eq!(ev1.event_type, ripx::parser::EventType::StartElement);
+    assert_eq!(ev1.data, b"a");
+
+    let ev2 = p.next_event().expect("fault");
+    assert_eq!(ev2.event_type, ripx::parser::EventType::Fault);
+    assert_eq!(ev2.error, Some(ripx::parser::ErrorCode::MismatchedEndElement));
+
+    // EOF should follow (unclosed 'a')
+    let ev3 = p.next_event().expect("eof or unclosed");
+    assert!(ev3.event_type == ripx::parser::EventType::Eof || ev3.event_type == ripx::parser::EventType::Fault);
+}
+
+#[test]
+fn orphaned_end_element_returns_end_and_symbol_present() {
+    let limits = default_limits();
+    let input = Cursor::new(b"</lonely>".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let ev = p.next_event().expect("end");
+    assert_eq!(ev.event_type, ripx::parser::EventType::EndElement);
+    assert_eq!(ev.data, b"lonely");
+
+    // Ensure the enum variant still exists and is printable
+    let s = format!("{:?}", ripx::parser::ErrorCode::OrphanedEndElement);
+    assert_eq!(s, "OrphanedEndElement");
+
+    let ev2 = p.next_event().expect("eof");
+    assert_eq!(ev2.event_type, ripx::parser::EventType::Eof);
+}
+
+#[test]
 fn mixed_text_and_tag_split() {
     let limits = default_limits();
     let input = Cursor::new(b"a<b>c".to_vec());

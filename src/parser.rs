@@ -57,6 +57,7 @@ pub enum ErrorCode {
     ProcessingInstructionTooLong,
     InvalidStructure,
     IoError,
+    MismatchedEndElement,
 }
 
 pub struct Attribute<'a> {
@@ -175,16 +176,61 @@ impl<R: io::Read> Parser<R> {
                 let (nlen, _delim) = scan_name(rest, self._limits.max_name_len);
                 // find closing '>'
                 if let Some(gt) = rest.iter().position(|&b| b == b'>') {
-                    self.scratch.name.clear();
-                    let to_copy = nlen.min(self.scratch.remaining_name_capacity());
-                    self.scratch.name.extend_from_slice(&rest[..to_copy]);
+                    // Copy the end-tag name into a local buffer so we don't disturb scratch.name
+                    let end_name = rest[..nlen].to_vec();
                     let consumed = 2 + gt + 1; // </ + name .. >
-                    // consume the end-tag bytes
+
+                    // If there's no open element to match, return EndElement (preserve prior behavior).
+                    if self.elem_stack.len() == 0 {
+                        // Append the parsed end-name into scratch.name so we can return a reference
+                        let start = self.scratch.name.len();
+                        let (copied, _truncated) = self.scratch.push_name(&end_name);
+                        let data_slice = &self.scratch.name[start..start + copied];
+                        self.input.consume(consumed);
+                        let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                        return Ok(Event { event_type: EventType::EndElement, data: data_slice, is_continuation: false, error: None, attributes: attrs });
+                    }
+
+                    // Compare end name to the top of the element stack
+                    let top = self.elem_stack.top().unwrap();
+                    let start = top.name_start;
+                    let end = start + top.name_len;
+                    let open_name = &self.scratch.name[start..end];
+                    if open_name != end_name.as_slice() {
+                        // mismatched end name -> OrphanedEndElement fault
+                        let payload: &[u8];
+                        if self._limits.include_fault_payload {
+                            self.scratch.text.clear();
+                            let available = buf.len().min(self.scratch.text.capacity());
+                            let _ = self.scratch.push_text_chunk(&buf[..available]);
+                            payload = &self.scratch.text[..];
+                        } else {
+                            payload = &[];
+                        }
+                        self.input.consume(consumed);
+                        loop {
+                            let _ = self.input.fill_from(&mut self._reader)?;
+                            let b2 = self.input.as_slice();
+                            if b2.is_empty() { break; }
+                            if let Some(pos) = b2.iter().position(|&c| c == b'<') {
+                                if pos > 0 { self.input.consume(pos); }
+                                break;
+                            } else {
+                                let n = b2.len(); self.input.consume(n);
+                            }
+                        }
+                        let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                        return Ok(Event { event_type: EventType::Fault, data: payload, is_continuation: false, error: Some(ErrorCode::MismatchedEndElement), attributes: attrs });
+                    }
+
+                    // Names match: pop and emit EndElement
+                    let f = self.elem_stack.pop().unwrap();
+                    let emit_frame = ElementFrame { name_start: f.name_start, name_len: f.name_len };
                     self.input.consume(consumed);
-                    // Pop the corresponding start element from the stack if present.
-                    let _ = self.elem_stack.pop();
                     let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                    return Ok(Event { event_type: EventType::EndElement, data: &self.scratch.name[..to_copy], is_continuation: false, error: None, attributes: attrs });
+                    let start = emit_frame.name_start;
+                    let end = start + emit_frame.name_len;
+                    return Ok(Event { event_type: EventType::EndElement, data: &self.scratch.name[start..end], is_continuation: false, error: None, attributes: attrs });
                 }
             }
             // start tag: '<name ...>' (not comment, not end, not PI/DOCTYPE)
