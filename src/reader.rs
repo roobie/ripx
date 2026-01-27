@@ -341,22 +341,22 @@ impl<R: BufRead> Reader<R> {
                     }
                 }
 
-                if let Some(max) = limit {
-                    if total > max {
-                        // if we had a partial match, flush it to out
-                        if matched > 0 {
-                            out.extend_from_slice(&pat[..matched]);
-                        }
-                        // include the current byte and then drain until next '<'
-                        out.push(b);
-                        drain_until_lt(self, &mut out)?;
-                        // persist what we've collected and signal error so caller can recover
-                        self.accumulator.extend_from_slice(&out);
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "CDATA size limit exceeded",
-                        ));
+                if let Some(max) = limit
+                    && total > max
+                {
+                    // if we had a partial match, flush it to out
+                    if matched > 0 {
+                        out.extend_from_slice(&pat[..matched]);
                     }
+                    // include the current byte and then drain until next '<'
+                    out.push(b);
+                    drain_until_lt(self, &mut out)?;
+                    // persist what we've collected and signal error so caller can recover
+                    self.accumulator.extend_from_slice(&out);
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "CDATA size limit exceeded",
+                    ));
                 }
 
                 if b == pat[matched] {
@@ -364,18 +364,16 @@ impl<R: BufRead> Reader<R> {
                     if matched == pat.len() {
                         return Ok(out);
                     }
-                } else {
-                    if matched > 0 {
-                        out.extend_from_slice(&pat[..matched]);
-                        matched = 0;
-                        if b == pat[0] {
-                            matched = 1;
-                        } else {
-                            out.push(b);
-                        }
+                } else if matched > 0 {
+                    out.extend_from_slice(&pat[..matched]);
+                    matched = 0;
+                    if b == pat[0] {
+                        matched = 1;
                     } else {
                         out.push(b);
                     }
+                } else {
+                    out.push(b);
                 }
             }
         }
@@ -567,20 +565,18 @@ impl<R: BufRead> Reader<R> {
                     if matched == pat.len() {
                         return Ok(out);
                     }
-                } else {
-                    if matched > 0 {
-                        // flush previously matched bytes
-                        out.extend_from_slice(&pat[..matched]);
-                        matched = 0;
-                        // reprocess current byte as potential start of pattern
-                        if b == pat[0] {
-                            matched = 1;
-                        } else {
-                            out.push(b);
-                        }
+                } else if matched > 0 {
+                    // flush previously matched bytes
+                    out.extend_from_slice(&pat[..matched]);
+                    matched = 0;
+                    // reprocess current byte as potential start of pattern
+                    if b == pat[0] {
+                        matched = 1;
                     } else {
                         out.push(b);
                     }
+                } else {
+                    out.push(b);
                 }
             }
         }
@@ -628,12 +624,10 @@ impl<R: BufRead> Reader<R> {
                     if matched == pat.len() {
                         return Ok(());
                     }
-                } else {
-                    if matched > 0 {
-                        matched = 0;
-                        if b == pat[0] {
-                            matched = 1;
-                        }
+                } else if matched > 0 {
+                    matched = 0;
+                    if b == pat[0] {
+                        matched = 1;
                     }
                 }
             }
