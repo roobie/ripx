@@ -60,6 +60,22 @@ Next actions
 2. Update `src/lib.rs` to export the parser API.
 3. Add test stubs under `tests/`.
 
+Recent updates (delta)
+- **End-tag validation implemented:** `End-tag name validation` and the `MismatchedEndElement` error were added to the parser core; explicit end-tags now compare against the element stack.
+- **Tests expanded:** `tests/parser_baseline.rs` was expanded with coverage for mismatched and orphaned end-tags, attribute robustness, and text-chunking resilience; baseline tests pass locally.
+- **Document reconciliation needed:** an explicit action item is added to reconcile and document the intended recovery semantics for `OrphanedEndElement` vs `MismatchedEndElement` (spec vs current behavior).
+
+Priority changes
+- **High priority:** move tokenizer chunking (`max_*_total_len`) and unified `ErrorRecovery` to the top of the implementation backlog — these are required to handle large/ill-formed inputs and to implement spec-compliant recovery.
+- **Integration tests:** add integration tests for CDATA/PI/DOCTYPE parsing, per-construct `*TooLong` faults, and the recovery behavior that synthesizes EndElements.
+
+Actionable next steps (concrete)
+1. Implement tokenizer chunking and per-construct total counters (text/comment/cdata/pi) and unit tests for chunk boundaries and `*TooLong` faults.
+2. Implement CDATA and PI parsing with chunking and `UnexpectedEof` semantics; add integration tests.
+3. Implement DOCTYPE skipping with bracket-depth handling and `InvalidStructure` emission; add tests.
+4. Implement unified `ErrorRecovery` per spec: single-fault-per-episode skipping until next `<`, synthesize EndElements when required, and document the final behavior (including `OrphanedEndElement` vs `MismatchedEndElement`).
+5. Run full test suite and CI, update `ParserV2.plan.md` and public docs to reflect final choices.
+
 ---
 
 Saved plan.
