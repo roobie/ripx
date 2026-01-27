@@ -344,8 +344,10 @@ impl<R: BufRead> Reader<R> {
 
     fn read_attribute(&mut self) -> io::Result<(Vec<u8>, Vec<u8>)> {
         let name = self.read_name()?;
+        self.accumulator.extend_from_slice(&name);
         self.skip_spaces()?;
         self.expect_byte(b'=')?;
+        self.accumulator.push(b'=');
         self.skip_spaces()?;
 
         let quote = self.peek_byte()?;
@@ -356,6 +358,7 @@ impl<R: BufRead> Reader<R> {
             ));
         }
         self.pos += 1; // consume quote
+        self.accumulator.push(quote);
 
         let mut out = Vec::new();
         loop {
@@ -370,9 +373,11 @@ impl<R: BufRead> Reader<R> {
                 let b = self.buf[self.pos];
                 if b == quote {
                     self.pos += 1;
+                    self.accumulator.push(quote);
                     return Ok((name, out));
                 } else {
                     out.push(b);
+                    self.accumulator.push(b);
                     self.pos += 1;
                 }
             }
