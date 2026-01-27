@@ -84,7 +84,7 @@ proptest! {
                     // nothing to check for now
                 }
                 EventType::Fault => {
-                    prop_assert!(false, "unexpected Fault event");
+                    prop_assert!(false, "unexpected Fault event: {:?} data={:?} bytes={:?}", ev.error, ev.data, bytes);
                 }
                 EventType::Comment | EventType::CData | EventType::ProcessingInstruction => {
                     prop_assert!(false, "unexpected event type in generated well-formed XML");

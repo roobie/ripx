@@ -179,7 +179,10 @@ impl<R: io::Read> Parser<R> {
                     let to_copy = nlen.min(self.scratch.remaining_name_capacity());
                     self.scratch.name.extend_from_slice(&rest[..to_copy]);
                     let consumed = 2 + gt + 1; // </ + name .. >
+                    // consume the end-tag bytes
                     self.input.consume(consumed);
+                    // Pop the corresponding start element from the stack if present.
+                    let _ = self.elem_stack.pop();
                     let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
                     return Ok(Event { event_type: EventType::EndElement, data: &self.scratch.name[..to_copy], is_continuation: false, error: None, attributes: attrs });
                 }
