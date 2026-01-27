@@ -232,8 +232,14 @@ fn start_element_with_attributes() {
     assert_eq!(n2, b"empty");
     assert_eq!(v2.len(), 0);
 
-    let ev2 = p.next_event().expect("eof");
-    assert_eq!(ev2.event_type, ripx::parser::EventType::Eof);
+    // Parser should emit an UnclosedElement Fault on EOF when start-tag not closed,
+    // then an Eof event.
+    let ev2 = p.next_event().expect("fault");
+    assert_eq!(ev2.event_type, ripx::parser::EventType::Fault);
+    assert_eq!(ev2.error, Some(ripx::parser::ErrorCode::UnclosedElement));
+
+    let ev3 = p.next_event().expect("eof");
+    assert_eq!(ev3.event_type, ripx::parser::EventType::Eof);
 }
 
 #[test]
