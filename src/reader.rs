@@ -303,22 +303,42 @@ impl<R: BufRead> Reader<R> {
                 self.pos += 1;
                 total = total.saturating_add(1);
 
-                // TODO: hitting a < inside a CDATA should be allowed, and we should only treat it as an error if we are reading more than limit bytes without seeing the terminator.
-                // However, for now we treat it as an error to allow the caller to recover gracefully.
-                // If we see a '<' inside a CDATA section, stop scanning so the parser can recover
+                // Allow '<' inside CDATA content; it is valid. Only treat '<' as a potential
+                // recovery point if it looks like the start of markup (e.g., '</', '<!--', '<![CDATA[', '<?').
                 if b == b'<' {
-                    if matched > 0 {
-                        out.extend_from_slice(&pat[..matched]);
-                        // matched = 0; // never read
+                    // peek next byte without consuming beyond buffer; if next byte is available and is '/','!','?',
+                    // then treat it as start of markup and stop scanning to allow recovery. Otherwise include '<' as data.
+                    self.fill_buf()?;
+                    if self.finished {
+                        out.push(b);
+                        continue;
                     }
-                    // step back so '<' is not consumed and can be reprocessed
-                    self.pos -= 1;
-                    // persist what we've collected and signal unterminated pattern so caller can recover
-                    self.accumulator.extend_from_slice(&out);
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("unterminated pattern {:?}", String::from_utf8_lossy(pat)),
-                    ));
+                    if self.pos < self.end {
+                        // next byte is at current pos (we already advanced pos for b), so peek it
+                        let next = self.buf[self.pos];
+                        if next == b'/' || next == b'!' || next == b'?' {
+                            if matched > 0 {
+                                out.extend_from_slice(&pat[..matched]);
+                                matched = 0;
+                            }
+                            // step back so '<' is not consumed and can be reprocessed by caller
+                            self.pos -= 1;
+                            // persist what we've collected and signal unterminated pattern so caller can recover
+                            self.accumulator.extend_from_slice(&out);
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("unterminated pattern {:?}", String::from_utf8_lossy(pat)),
+                            ));
+                        } else {
+                            // treat '<' as data
+                            out.push(b);
+                            continue;
+                        }
+                    } else {
+                        // no lookahead available, be conservative and treat '<' as data
+                        out.push(b);
+                        continue;
+                    }
                 }
 
                 if let Some(max) = limit {
