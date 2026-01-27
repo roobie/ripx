@@ -51,6 +51,54 @@ pub fn scan_name(buf: &[u8], max_len: usize) -> (usize, Option<u8>) {
     (len, delim)
 }
 
+/// Find the end of an XML comment (`-->`) starting anywhere in `haystack`.
+pub fn find_comment_end(haystack: &[u8]) -> Option<usize> {
+    find_sequence(haystack, b"-->")
+}
+
+/// Find the end of a CDATA section (`]]>`) starting anywhere in `haystack`.
+pub fn find_cdata_end(haystack: &[u8]) -> Option<usize> {
+    find_sequence(haystack, b"]]>")
+}
+
+/// Find the end of a processing instruction (`?>`) starting anywhere in `haystack`.
+pub fn find_pi_end(haystack: &[u8]) -> Option<usize> {
+    find_sequence(haystack, b"?>")
+}
+
+/// Scan an attribute value from the start of `buf`.
+/// If the value begins with a quote (`'` or `"`), scan until the matching quote.
+/// Otherwise scan until whitespace or `>` or `/`. The returned length is
+/// clamped to `max_len`. The delimiter returned is the byte that terminated
+/// the value (the closing quote, whitespace, `>`, `/`, or `=` if present), or
+/// `None` when the buffer ended before a terminator was seen.
+pub fn scan_attr_value(buf: &[u8], max_len: usize) -> (usize, Option<u8>) {
+    if buf.is_empty() { return (0, None); }
+    let first = buf[0];
+    let mut len = 0usize;
+    if first == b'\'' || first == b'\"' {
+        // quoted value: include anything until matching quote
+        len = 1; // start after opening quote
+        while len < buf.len() && len < max_len {
+            if buf[len] == first { return (len + 1, Some(first)); }
+            len += 1;
+        }
+        let delim = if len < buf.len() { Some(buf[len]) } else { None };
+        (len.min(max_len), delim)
+    } else {
+        // unquoted: stop at whitespace, '>' or '/'
+        while len < buf.len() && len < max_len {
+            let b = buf[len];
+            match b {
+                b' ' | b'\t' | b'\r' | b'\n' | b'>' | b'/' => return (len, Some(b)),
+                _ => len += 1,
+            }
+        }
+        let delim = if len < buf.len() { Some(buf[len]) } else { None };
+        (len, delim)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,5 +134,46 @@ mod tests {
         let (len, delim) = scan_name(buf, 4);
         assert_eq!(len, 4);
         assert_eq!(delim, Some(b'n'));
+    }
+
+    #[test]
+    fn find_comment_end_basic() {
+        let h = b"abc-->def";
+        assert_eq!(find_comment_end(h), Some(3));
+        assert_eq!(find_comment_end(b"no end here"), None);
+    }
+
+    #[test]
+    fn find_cdata_end_basic() {
+        let h = b"xyz]]>more";
+        assert_eq!(find_cdata_end(h), Some(3));
+    }
+
+    #[test]
+    fn find_pi_end_basic() {
+        let h = b"pre?>post";
+        assert_eq!(find_pi_end(h), Some(3));
+    }
+
+    #[test]
+    fn scan_attr_value_quoted_and_unquoted() {
+        let q = b"\"value\" rest";
+        let (len, delim) = scan_attr_value(q, 100);
+        assert_eq!(len, 7);
+        assert_eq!(delim, Some(b'\"'));
+
+        let s = b"unquoted>tail";
+        let (len2, delim2) = scan_attr_value(s, 100);
+        assert_eq!(len2, 8);
+        assert_eq!(delim2, Some(b'>'));
+    }
+
+    #[test]
+    fn scan_attr_value_truncates() {
+        let q = b"\"abcdefghijkl"; // starts with '"'
+        let (len, delim) = scan_attr_value(q, 5);
+        assert_eq!(len, 5);
+        // delim should be Some(next byte) because we truncated before closing quote
+        assert!(delim.is_some());
     }
 }
