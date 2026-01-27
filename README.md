@@ -10,7 +10,7 @@
 
 ## Features (MVP)
 - Streaming reader that emits events: StartElement, EndElement, Text, Comment, CData, Eof.
-- Simple attribute parsing and basic entity decoding.
+- Simple attribute parsing; parser now emits raw bytes for textual payloads and does not decode entities (consumers must decode).
 - Path stack + small query language: Anywhere (`//name`) and Absolute (`/a/b/c`) selectors.
 - Designed to be single‑pass and able to handle huge files.
 

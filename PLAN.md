@@ -12,11 +12,11 @@ Assumptions:
 
 - `src/lib.rs`
   - Re‑exports and top‑level types.
-- `src/reader.rs`
+- `src/reader.rs` (modified to emit raw bytes for text, attributes, and accumulated markup)
   - Streaming XML reader + iterator over events.
 - `src/tokenizer.rs`
   - Low‑level byte scanning and tokenization.
-- `src/query.rs`
+- `src/query.rs` (adapted to convert bytes to strings for legacy Query trait usage)
   - Simple query predicates + path tracking.
 - `src/bin/xmlq.rs` (optional)
   - CLI: `xmlq --path "//item" file.xml`.
