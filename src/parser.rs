@@ -92,12 +92,24 @@ impl<R: io::Read> Parser<R> {
         if let Err(e) = limits.validate() {
             panic!("Invalid ParserLimits: {}", e);
         }
-        Parser { _reader: reader, _limits: limits }
+        Parser {
+            _reader: reader,
+            _limits: limits,
+        }
     }
 
     pub fn next_event<'a>(&'a mut self) -> io::Result<Event<'a>> {
         // Actual implementation will be filled in later; return Eof as placeholder.
-        let attrs = Attributes { _private: (), _phantom: std::marker::PhantomData };
-        Ok(Event { event_type: EventType::Eof, data: &[], is_continuation: false, error: None, attributes: attrs })
+        let attrs = Attributes {
+            _private: (),
+            _phantom: std::marker::PhantomData,
+        };
+        Ok(Event {
+            event_type: EventType::Eof,
+            data: &[],
+            is_continuation: false,
+            error: None,
+            attributes: attrs,
+        })
     }
 }

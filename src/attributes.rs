@@ -25,21 +25,32 @@ pub struct AttributeTable {
 
 impl AttributeTable {
     pub fn with_capacity(cap: usize) -> Self {
-        AttributeTable { entries: Vec::with_capacity(cap), capacity: cap }
+        AttributeTable {
+            entries: Vec::with_capacity(cap),
+            capacity: cap,
+        }
     }
 
-    pub fn len(&self) -> usize { self.entries.len() }
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
 
-    pub fn clear(&mut self) { self.entries.clear(); }
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
 
     /// Push an internal attribute; returns Err(()) if capacity exceeded.
     pub fn push_entry(&mut self, ia: InternalAttribute) -> Result<(), ()> {
-        if self.entries.len() >= self.capacity { return Err(()); }
+        if self.entries.len() >= self.capacity {
+            return Err(());
+        }
         self.entries.push(ia);
         Ok(())
     }
 
-    pub fn as_slice(&self) -> &[InternalAttribute] { &self.entries }
+    pub fn as_slice(&self) -> &[InternalAttribute] {
+        &self.entries
+    }
 }
 
 pub struct AttributesInner<'a> {
@@ -53,21 +64,35 @@ pub struct Attributes<'a> {
 }
 
 impl<'a> Attributes<'a> {
-    pub fn from_parts(entries: &'a [InternalAttribute], input: &'a [u8], scratch: &'a ScratchBuffers) -> Self {
-        Attributes { inner: AttributesInner { entries, input_buf: input, scratch } }
+    pub fn from_parts(
+        entries: &'a [InternalAttribute],
+        input: &'a [u8],
+        scratch: &'a ScratchBuffers,
+    ) -> Self {
+        Attributes {
+            inner: AttributesInner {
+                entries,
+                input_buf: input,
+                scratch,
+            },
+        }
     }
 
     fn resolve(&self, kind: NameBufferKind, start: usize, len: usize) -> &'a [u8] {
         match kind {
-            NameBufferKind::Input => &self.inner.input_buf[start..start+len],
-            NameBufferKind::NameScratch => &self.inner.scratch.name[start..start+len],
-            NameBufferKind::AttrNameScratch => &self.inner.scratch.attr_name[start..start+len],
-            NameBufferKind::AttrValueScratch => &self.inner.scratch.attr_value[start..start+len],
+            NameBufferKind::Input => &self.inner.input_buf[start..start + len],
+            NameBufferKind::NameScratch => &self.inner.scratch.name[start..start + len],
+            NameBufferKind::AttrNameScratch => &self.inner.scratch.attr_name[start..start + len],
+            NameBufferKind::AttrValueScratch => &self.inner.scratch.attr_value[start..start + len],
         }
     }
 
-    pub fn len(&self) -> usize { self.inner.entries.len() }
-    pub fn is_empty(&self) -> bool { self.inner.entries.is_empty() }
+    pub fn len(&self) -> usize {
+        self.inner.entries.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.inner.entries.is_empty()
+    }
 
     pub fn get(&self, idx: usize) -> Option<(&'a [u8], &'a [u8])> {
         let ia = self.inner.entries.get(idx)?;
@@ -92,8 +117,22 @@ mod tests {
     #[test]
     fn attributes_resolution_input_and_scratch() {
         let mut table = AttributeTable::with_capacity(2);
-        let ia1 = InternalAttribute { name_buffer: NameBufferKind::Input, name_start: 0, name_len: 3, value_buffer: NameBufferKind::Input, value_start: 3, value_len: 2 };
-        let ia2 = InternalAttribute { name_buffer: NameBufferKind::AttrNameScratch, name_start: 0, name_len: 2, value_buffer: NameBufferKind::AttrValueScratch, value_start: 0, value_len: 3 };
+        let ia1 = InternalAttribute {
+            name_buffer: NameBufferKind::Input,
+            name_start: 0,
+            name_len: 3,
+            value_buffer: NameBufferKind::Input,
+            value_start: 3,
+            value_len: 2,
+        };
+        let ia2 = InternalAttribute {
+            name_buffer: NameBufferKind::AttrNameScratch,
+            name_start: 0,
+            name_len: 2,
+            value_buffer: NameBufferKind::AttrValueScratch,
+            value_start: 0,
+            value_len: 3,
+        };
         assert!(table.push_entry(ia1).is_ok());
         assert!(table.push_entry(ia2).is_ok());
 

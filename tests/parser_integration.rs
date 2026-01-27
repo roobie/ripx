@@ -1,5 +1,5 @@
+use ripx::parser::{EventType, Parser, ParserLimits};
 use std::io::Cursor;
-use ripx::parser::{Parser, ParserLimits, EventType};
 
 #[test]
 fn parser_eof_placeholder() {

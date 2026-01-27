@@ -21,17 +21,25 @@ pub enum State {
     Eof,
 }
 
-impl Default for State { fn default() -> Self { State::Data } }
+impl Default for State {
+    fn default() -> Self {
+        State::Data
+    }
+}
 
 /// Find the first occurrence of `needle` inside `haystack` and return the
 /// byte index, or `None` if not found. Simple non-optimized implementation
 /// suitable for tests and initial tokenizer logic.
 pub fn find_sequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() { return Some(0); }
+    if needle.is_empty() {
+        return Some(0);
+    }
     if needle.len() == 1 {
         return haystack.iter().position(|&b| b == needle[0]);
     }
-    if needle.len() > haystack.len() { return None; }
+    if needle.len() > haystack.len() {
+        return None;
+    }
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
@@ -44,10 +52,16 @@ pub fn scan_name(buf: &[u8], max_len: usize) -> (usize, Option<u8>) {
         let b = buf[len];
         match b {
             b' ' | b'\t' | b'\r' | b'\n' | b'/' | b'>' | b'=' => return (len, Some(b)),
-            _ => { len += 1; }
+            _ => {
+                len += 1;
+            }
         }
     }
-    let delim = if len < buf.len() { Some(buf[len]) } else { None };
+    let delim = if len < buf.len() {
+        Some(buf[len])
+    } else {
+        None
+    };
     (len, delim)
 }
 
@@ -73,17 +87,25 @@ pub fn find_pi_end(haystack: &[u8]) -> Option<usize> {
 /// the value (the closing quote, whitespace, `>`, `/`, or `=` if present), or
 /// `None` when the buffer ended before a terminator was seen.
 pub fn scan_attr_value(buf: &[u8], max_len: usize) -> (usize, Option<u8>) {
-    if buf.is_empty() { return (0, None); }
+    if buf.is_empty() {
+        return (0, None);
+    }
     let first = buf[0];
     let mut len = 0usize;
     if first == b'\'' || first == b'\"' {
         // quoted value: include anything until matching quote
         len = 1; // start after opening quote
         while len < buf.len() && len < max_len {
-            if buf[len] == first { return (len + 1, Some(first)); }
+            if buf[len] == first {
+                return (len + 1, Some(first));
+            }
             len += 1;
         }
-        let delim = if len < buf.len() { Some(buf[len]) } else { None };
+        let delim = if len < buf.len() {
+            Some(buf[len])
+        } else {
+            None
+        };
         (len.min(max_len), delim)
     } else {
         // unquoted: stop at whitespace, '>' or '/'
@@ -94,7 +116,11 @@ pub fn scan_attr_value(buf: &[u8], max_len: usize) -> (usize, Option<u8>) {
                 _ => len += 1,
             }
         }
-        let delim = if len < buf.len() { Some(buf[len]) } else { None };
+        let delim = if len < buf.len() {
+            Some(buf[len])
+        } else {
+            None
+        };
         (len, delim)
     }
 }
@@ -126,7 +152,12 @@ pub fn consume_pi(haystack: &[u8]) -> Option<usize> {
 /// vector of `(name, value)` pairs (both as owned `Vec<u8>`), the number of
 /// bytes consumed from `buf`, and a boolean flag indicating whether any
 /// truncation/limits were hit.
-pub fn parse_attributes(mut buf: &[u8], max_name_len: usize, max_value_len: usize, max_attrs: usize) -> (Vec<(Vec<u8>, Vec<u8>)>, usize, bool) {
+pub fn parse_attributes(
+    mut buf: &[u8],
+    max_name_len: usize,
+    max_value_len: usize,
+    max_attrs: usize,
+) -> (Vec<(Vec<u8>, Vec<u8>)>, usize, bool) {
     let mut out = Vec::new();
     let mut consumed = 0usize;
     let mut hit_limit = false;
@@ -149,16 +180,29 @@ pub fn parse_attributes(mut buf: &[u8], max_name_len: usize, max_value_len: usiz
         consumed += sk;
         buf = rest;
 
-        if buf.is_empty() { break; }
+        if buf.is_empty() {
+            break;
+        }
         // Stop if we reached the end of the start tag
-        if buf[0] == b'>' { consumed += 1; break; }
-        if buf.len() >= 2 && buf[0] == b'/' && buf[1] == b'>' { consumed += 2; break; }
+        if buf[0] == b'>' {
+            consumed += 1;
+            break;
+        }
+        if buf.len() >= 2 && buf[0] == b'/' && buf[1] == b'>' {
+            consumed += 2;
+            break;
+        }
 
-        if out.len() >= max_attrs { hit_limit = true; break; }
+        if out.len() >= max_attrs {
+            hit_limit = true;
+            break;
+        }
 
         // parse name (copy up to max_name_len but consume the entire original name)
         let (name_len, _delim) = scan_name(buf, max_name_len);
-        if name_len == 0 { break; }
+        if name_len == 0 {
+            break;
+        }
         // If we hit the max_name_len, the real name may be longer; advance to the
         // real delimiter so remaining characters don't become a new attribute.
         let mut full_name_len = name_len;
@@ -176,7 +220,8 @@ pub fn parse_attributes(mut buf: &[u8], max_name_len: usize, max_value_len: usiz
 
         // skip whitespace
         let (sk2, rest2) = skip_ws(buf);
-        consumed += sk2; buf = rest2;
+        consumed += sk2;
+        buf = rest2;
 
         // expect '='
         if buf.is_empty() || buf[0] != b'=' {
@@ -185,11 +230,16 @@ pub fn parse_attributes(mut buf: &[u8], max_name_len: usize, max_value_len: usiz
             continue;
         }
         // consume '='
-        buf = &buf[1..]; consumed += 1;
+        buf = &buf[1..];
+        consumed += 1;
         let (sk3, rest3) = skip_ws(buf);
-        consumed += sk3; buf = rest3;
+        consumed += sk3;
+        buf = rest3;
 
-        if buf.is_empty() { out.push((name, Vec::new())); break; }
+        if buf.is_empty() {
+            out.push((name, Vec::new()));
+            break;
+        }
 
         // scan value
         let (vlen, _vdelim) = scan_attr_value(buf, max_value_len);
@@ -202,12 +252,15 @@ pub fn parse_attributes(mut buf: &[u8], max_name_len: usize, max_value_len: usiz
                 // isn't parsed as further attributes.
                 if vlen == max_value_len {
                     while full_vlen < buf.len() {
-                        if buf[full_vlen] == buf[0] { full_vlen += 1; break; }
+                        if buf[full_vlen] == buf[0] {
+                            full_vlen += 1;
+                            break;
+                        }
                         full_vlen += 1;
                     }
                 }
                 if vlen >= 2 {
-                    value.extend_from_slice(&buf[1..vlen-1]);
+                    value.extend_from_slice(&buf[1..vlen - 1]);
                 }
             } else {
                 // unquoted: if truncated, advance to next whitespace or '>' '/' delimiter
@@ -221,7 +274,8 @@ pub fn parse_attributes(mut buf: &[u8], max_name_len: usize, max_value_len: usiz
                 }
                 value.extend_from_slice(&buf[..vlen]);
             }
-            buf = &buf[full_vlen..]; consumed += full_vlen;
+            buf = &buf[full_vlen..];
+            consumed += full_vlen;
         } else {
             // empty value
         }
@@ -239,7 +293,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn initial_state_is_data() { assert_eq!(State::default(), State::Data); }
+    fn initial_state_is_data() {
+        assert_eq!(State::default(), State::Data);
+    }
 
     #[test]
     fn find_sequence_basic() {
@@ -323,7 +379,7 @@ mod tests {
         assert_eq!(attrs[1].0, b"b".to_vec());
         assert_eq!(attrs[1].1, b"two".to_vec());
         // consumed must be at least up to and including '/>'
-        assert!(consumed >=  (buf.len() - b"rest".len()));
+        assert!(consumed >= (buf.len() - b"rest".len()));
     }
 
     #[test]

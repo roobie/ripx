@@ -12,22 +12,38 @@ pub struct ElementStack {
 
 impl ElementStack {
     pub fn with_capacity(cap: usize) -> Self {
-        ElementStack { frames: Vec::with_capacity(cap), capacity: cap }
+        ElementStack {
+            frames: Vec::with_capacity(cap),
+            capacity: cap,
+        }
     }
 
-    pub fn len(&self) -> usize { self.frames.len() }
+    pub fn len(&self) -> usize {
+        self.frames.len()
+    }
 
     /// Push a name by copying into `scratch.name`. The name will be truncated to
     /// `max_name_len` and to the remaining scratch capacity. Returns Err(()) if
     /// the depth limit would be exceeded.
-    pub fn push_name(&mut self, scratch: &mut ScratchBuffers, name: &[u8], max_name_len: usize) -> Result<(), ()> {
+    pub fn push_name(
+        &mut self,
+        scratch: &mut ScratchBuffers,
+        name: &[u8],
+        max_name_len: usize,
+    ) -> Result<(), ()> {
         if self.frames.len() >= self.capacity {
             return Err(());
         }
-        let to_copy = name.len().min(max_name_len).min(scratch.remaining_name_capacity());
+        let to_copy = name
+            .len()
+            .min(max_name_len)
+            .min(scratch.remaining_name_capacity());
         let start = scratch.name.len();
         scratch.name.extend_from_slice(&name[..to_copy]);
-        let frame = ElementFrame { name_start: start, name_len: to_copy };
+        let frame = ElementFrame {
+            name_start: start,
+            name_len: to_copy,
+        };
         self.frames.push(frame);
         Ok(())
     }
@@ -40,9 +56,13 @@ impl ElementStack {
         Ok(())
     }
 
-    pub fn pop(&mut self) -> Option<ElementFrame> { self.frames.pop() }
+    pub fn pop(&mut self) -> Option<ElementFrame> {
+        self.frames.pop()
+    }
 
-    pub fn top(&self) -> Option<&ElementFrame> { self.frames.last() }
+    pub fn top(&self) -> Option<&ElementFrame> {
+        self.frames.last()
+    }
 }
 
 #[cfg(test)]
@@ -54,9 +74,27 @@ mod tests {
     fn stack_push_pop() {
         let mut s = ElementStack::with_capacity(2);
         assert_eq!(s.len(), 0);
-        assert!(s.push(ElementFrame { name_start: 0, name_len: 3 }).is_ok());
-        assert!(s.push(ElementFrame { name_start: 3, name_len: 2 }).is_ok());
-        assert!(s.push(ElementFrame { name_start: 5, name_len: 1 }).is_err());
+        assert!(
+            s.push(ElementFrame {
+                name_start: 0,
+                name_len: 3
+            })
+            .is_ok()
+        );
+        assert!(
+            s.push(ElementFrame {
+                name_start: 3,
+                name_len: 2
+            })
+            .is_ok()
+        );
+        assert!(
+            s.push(ElementFrame {
+                name_start: 5,
+                name_len: 1
+            })
+            .is_err()
+        );
         assert_eq!(s.len(), 2);
         s.pop();
         assert_eq!(s.len(), 1);

@@ -41,11 +41,19 @@ impl ScratchBuffers {
     }
 
     /// Remaining capacity for a vector.
-    fn remaining_capacity(vec: &Vec<u8>) -> usize { vec.capacity().saturating_sub(vec.len()) }
+    fn remaining_capacity(vec: &Vec<u8>) -> usize {
+        vec.capacity().saturating_sub(vec.len())
+    }
 
-    pub fn remaining_name_capacity(&self) -> usize { Self::remaining_capacity(&self.name) }
-    pub fn remaining_attr_name_capacity(&self) -> usize { Self::remaining_capacity(&self.attr_name) }
-    pub fn remaining_attr_value_capacity(&self) -> usize { Self::remaining_capacity(&self.attr_value) }
+    pub fn remaining_name_capacity(&self) -> usize {
+        Self::remaining_capacity(&self.name)
+    }
+    pub fn remaining_attr_name_capacity(&self) -> usize {
+        Self::remaining_capacity(&self.attr_name)
+    }
+    pub fn remaining_attr_value_capacity(&self) -> usize {
+        Self::remaining_capacity(&self.attr_value)
+    }
 
     /// Push into `name` buffer, truncating if necessary. Returns (bytes_copied, was_truncated).
     pub fn push_name(&mut self, data: &[u8]) -> (usize, bool) {

@@ -12,16 +12,31 @@ impl InputBuffer {
     pub fn with_capacity(cap: usize) -> Self {
         let mut v = Vec::with_capacity(cap);
         v.resize(cap, 0);
-        InputBuffer { buf: v.into_boxed_slice(), start: 0, end: 0, eof: false }
+        InputBuffer {
+            buf: v.into_boxed_slice(),
+            start: 0,
+            end: 0,
+            eof: false,
+        }
     }
 
-    pub fn len(&self) -> usize { self.end - self.start }
+    pub fn len(&self) -> usize {
+        self.end - self.start
+    }
 
-    pub fn capacity(&self) -> usize { self.buf.len() }
+    pub fn capacity(&self) -> usize {
+        self.buf.len()
+    }
 
-    pub fn as_slice(&self) -> &[u8] { &self.buf[self.start..self.end] }
+    pub fn as_slice(&self) -> &[u8] {
+        &self.buf[self.start..self.end]
+    }
 
-    pub fn clear(&mut self) { self.start = 0; self.end = 0; self.eof = false; }
+    pub fn clear(&mut self) {
+        self.start = 0;
+        self.end = 0;
+        self.eof = false;
+    }
 
     /// Consume `n` bytes from the front of the buffer.
     pub fn consume(&mut self, n: usize) {
@@ -39,7 +54,9 @@ impl InputBuffer {
     pub fn ensure<R: Read>(&mut self, n: usize, reader: &mut R) -> io::Result<bool> {
         while self.len() < n && !self.eof {
             let _ = self.fill_from(reader)?;
-            if self.len() >= n { break; }
+            if self.len() >= n {
+                break;
+            }
         }
         Ok(self.len() >= n)
     }
@@ -47,7 +64,9 @@ impl InputBuffer {
     /// Fill buffer from reader, shifting data to front if necessary.
     /// Returns number of bytes read (0 on EOF).
     pub fn fill_from<R: Read>(&mut self, reader: &mut R) -> io::Result<usize> {
-        if self.eof { return Ok(0); }
+        if self.eof {
+            return Ok(0);
+        }
         // If there's no space at the end, but there is consumed space at front, slide data.
         if self.end == self.buf.len() {
             if self.start > 0 {
@@ -63,8 +82,14 @@ impl InputBuffer {
         }
         let read_into = &mut self.buf[self.end..];
         match reader.read(read_into) {
-            Ok(0) => { self.eof = true; Ok(0) }
-            Ok(n) => { self.end += n; Ok(n) }
+            Ok(0) => {
+                self.eof = true;
+                Ok(0)
+            }
+            Ok(n) => {
+                self.end += n;
+                Ok(n)
+            }
             Err(e) => Err(e),
         }
     }
