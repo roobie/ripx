@@ -4,16 +4,16 @@ use std::mem;
 #[derive(Debug, PartialEq, Clone)]
 pub enum Event {
     StartElement {
-        name: String,
-        attributes: Vec<(String, String)>,
+        name: Vec<u8>,
+        attributes: Vec<(Vec<u8>, Vec<u8>)>,
     },
     EndElement {
-        name: String,
-        accumulated: String,
+        name: Vec<u8>,
+        accumulated: Vec<u8>,
     },
-    Text(String),
-    Comment(String),
-    CData(String),
+    Text(Vec<u8>),
+    Comment(Vec<u8>),
+    CData(Vec<u8>),
     Eof,
 }
 
@@ -30,7 +30,7 @@ pub struct Reader<R: BufRead> {
     state: State,
     finished: bool,
     // NEW: synthetic end-tags for empty elements (<tag/>)
-    pending_end: Vec<String>,
+    pending_end: Vec<Vec<u8>>,
     accumulator: Vec<u8>,
 }
 
@@ -48,9 +48,8 @@ impl<R: BufRead> Reader<R> {
         }
     }
 
-    fn get_accumulated(&mut self) -> String {
-        let bytes = mem::take(&mut self.accumulator); // leaves an empty Vec<u8> in place
-        String::from_utf8(bytes).unwrap() // TODO error handling
+    fn get_accumulated(&mut self) -> Vec<u8> {
+        mem::take(&mut self.accumulator)
     }
 
     /// Try to resynchronize after an error.
@@ -128,7 +127,7 @@ impl<R: BufRead> Reader<R> {
             match self.state {
                 State::OutsideTag => {
                     let text = self.read_text_until_lt()?;
-                    self.accumulator.append(text.as_bytes().to_vec().as_mut());
+                    self.accumulator.extend_from_slice(&text);
                     if !text.is_empty() {
                         return Ok(Event::Text(text));
                     }
@@ -146,7 +145,7 @@ impl<R: BufRead> Reader<R> {
                             self.pos += 1; // consume '/'
                             self.accumulator.push(c);
                             let name = self.read_name()?;
-                            self.accumulator.append(name.as_bytes().to_vec().as_mut());
+                            self.accumulator.extend_from_slice(&name);
                             self.skip_spaces()?;
                             self.expect_byte(b'>')?;
                             self.accumulator.push(b'>');
@@ -161,13 +160,12 @@ impl<R: BufRead> Reader<R> {
                             self.accumulator.push(c);
                             if self.try_consume(b"--")? {
                                 let comment = self.read_until_bytes(b"-->")?;
-                                self.accumulator
-                                    .append(comment.as_bytes().to_vec().as_mut());
+                                self.accumulator.extend_from_slice(&comment);
                                 self.state = State::OutsideTag;
                                 return Ok(Event::Comment(comment));
                             } else if self.try_consume(b"[CDATA[")? {
                                 let cdata = self.read_until_bytes(b"]]>")?;
-                                self.accumulator.append(cdata.as_bytes().to_vec().as_mut());
+                                self.accumulator.extend_from_slice(&cdata);
                                 self.state = State::OutsideTag;
                                 return Ok(Event::CData(cdata));
                             } else {
@@ -187,8 +185,8 @@ impl<R: BufRead> Reader<R> {
                         }
                         _ => {
                             let name = self.read_name()?;
-                            self.accumulator.append(name.as_bytes().to_vec().as_mut());
-                            let mut attrs = Vec::new();
+                            self.accumulator.extend_from_slice(&name);
+                            let mut attrs: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
                             loop {
                                 self.skip_spaces()?;
                                 let b = self.peek_byte()?;
@@ -256,7 +254,7 @@ impl<R: BufRead> Reader<R> {
         Ok(self.buf[self.pos])
     }
 
-    fn read_text_until_lt(&mut self) -> io::Result<String> {
+    fn read_text_until_lt(&mut self) -> io::Result<Vec<u8>> {
         let mut out = Vec::new();
         loop {
             self.fill_buf()?;
@@ -266,17 +264,16 @@ impl<R: BufRead> Reader<R> {
             while self.pos < self.end {
                 let b = self.buf[self.pos];
                 if b == b'<' {
-                    return String::from_utf8(out)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
+                    return Ok(out);
                 }
                 out.push(b);
                 self.pos += 1;
             }
         }
-        String::from_utf8(out).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        Ok(out)
     }
 
-    fn read_name(&mut self) -> io::Result<String> {
+    fn read_name(&mut self) -> io::Result<Vec<u8>> {
         self.skip_spaces()?;
         let mut out = Vec::new();
         loop {
@@ -293,8 +290,7 @@ impl<R: BufRead> Reader<R> {
                     if out.is_empty() {
                         return Err(io::Error::new(io::ErrorKind::InvalidData, "expected name"));
                     }
-                    return String::from_utf8(out)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
+                    return Ok(out);
                 }
             }
         }
@@ -304,7 +300,7 @@ impl<R: BufRead> Reader<R> {
                 "EOF while reading name",
             ));
         }
-        String::from_utf8(out).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        Ok(out)
     }
 
     fn skip_spaces(&mut self) -> io::Result<()> {
@@ -346,7 +342,7 @@ impl<R: BufRead> Reader<R> {
         }
     }
 
-    fn read_attribute(&mut self) -> io::Result<(String, String)> {
+    fn read_attribute(&mut self) -> io::Result<(Vec<u8>, Vec<u8>)> {
         let name = self.read_name()?;
         self.skip_spaces()?;
         self.expect_byte(b'=')?;
@@ -374,9 +370,7 @@ impl<R: BufRead> Reader<R> {
                 let b = self.buf[self.pos];
                 if b == quote {
                     self.pos += 1;
-                    let s = String::from_utf8(out)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                    return Ok((name, decode_basic_entities(&s)));
+                    return Ok((name, out));
                 } else {
                     out.push(b);
                     self.pos += 1;
@@ -387,12 +381,12 @@ impl<R: BufRead> Reader<R> {
 
     /// Streaming search for a pattern that may cross buffer boundaries.
     /// Returns everything up to (but not including) the pattern.
-    fn read_until_bytes(&mut self, pat: &[u8]) -> io::Result<String> {
+    fn read_until_bytes(&mut self, pat: &[u8]) -> io::Result<Vec<u8>> {
         let mut out = Vec::new();
         let mut matched = 0usize;
 
         if pat.is_empty() {
-            return Ok(String::new());
+            return Ok(Vec::new());
         }
 
         loop {
@@ -408,8 +402,7 @@ impl<R: BufRead> Reader<R> {
                 if b == pat[matched] {
                     matched += 1;
                     if matched == pat.len() {
-                        return String::from_utf8(out)
-                            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
+                        return Ok(out);
                     }
                 } else {
                     if matched > 0 {
@@ -430,7 +423,7 @@ impl<R: BufRead> Reader<R> {
         }
 
         // pattern not found; return collected text
-        String::from_utf8(out).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        Ok(out)
     }
 
     fn skip_until_byte(&mut self, target: u8) -> io::Result<()> {
@@ -516,14 +509,6 @@ fn is_name_char(b: u8) -> bool {
     matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b':' | b'.' | b'-')
 }
 
-fn decode_basic_entities(s: &str) -> String {
-    s.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-        .replace("&apos;", "'")
-        .replace("&quot;", "\"")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,7 +540,9 @@ mod tests {
             .into_iter()
             .filter_map(|e| match e {
                 Event::Text(t) => {
-                    if t.trim().is_empty() {
+                    if t.iter()
+                        .all(|&b| b == b' ' || b == b'\n' || b == b'\r' || b == b'\t')
+                    {
                         None
                     } else {
                         Some(Event::Text(t))
@@ -572,7 +559,9 @@ mod tests {
         let ev = events_from(xml);
         assert_eq!(ev.len(), 2);
         match &ev[1] {
-            Event::EndElement { accumulated, .. } => assert_eq!(accumulated, xml),
+            Event::EndElement { accumulated, .. } => {
+                assert_eq!(accumulated.as_slice(), xml.as_bytes())
+            }
             _ => panic!("expected EndElement"),
         }
     }
@@ -584,13 +573,13 @@ mod tests {
         assert_eq!(ev.len(), 2);
         match &ev[0] {
             Event::StartElement { name, attributes } => {
-                assert_eq!(name, "root");
+                assert_eq!(name.as_slice(), b"root");
                 assert!(attributes.is_empty());
             }
             _ => panic!("expected StartElement"),
         }
         match &ev[1] {
-            Event::EndElement { name, .. } => assert_eq!(name, "root"),
+            Event::EndElement { name, .. } => assert_eq!(name.as_slice(), b"root"),
             _ => panic!("expected EndElement"),
         }
     }
@@ -603,7 +592,7 @@ mod tests {
         assert_eq!(ev.len(), 2);
         match &ev[0] {
             Event::StartElement { name, attributes } => {
-                assert_eq!(name, "root");
+                assert_eq!(name.as_slice(), b"root");
                 assert!(attributes.is_empty());
             }
             _ => panic!("expected StartElement"),
@@ -623,31 +612,33 @@ mod tests {
         assert_eq!(ev.len(), 8);
 
         match &ev[0] {
-            Event::StartElement { name, .. } => assert_eq!(name, "root"),
+            Event::StartElement { name, .. } => assert_eq!(name.as_slice(), b"root"),
             _ => panic!("expected StartElement(root)"),
         }
         match &ev[1] {
-            Event::StartElement { name, .. } => assert_eq!(name, "child"),
+            Event::StartElement { name, .. } => assert_eq!(name.as_slice(), b"child"),
             _ => panic!("expected StartElement(child)"),
         }
         match &ev[2] {
-            Event::Text(t) => assert_eq!(t, "hello"),
+            Event::Text(t) => assert_eq!(t.as_slice(), b"hello"),
             _ => panic!("expected Text(hello)"),
         }
         match &ev[3] {
-            Event::EndElement { name, .. } => assert_eq!(name, "child"),
+            Event::EndElement { name, .. } => assert_eq!(name.as_slice(), b"child"),
             _ => panic!("expected EndElement(child)"),
         }
         match &ev[4] {
-            Event::StartElement { name, .. } => assert_eq!(name, "child"),
+            Event::StartElement { name, .. } => assert_eq!(name.as_slice(), b"child"),
             _ => panic!("expected StartElement(child)"),
         }
         match &ev[5] {
-            Event::Text(t) => assert_eq!(t, "world"),
+            Event::Text(t) => assert_eq!(t.as_slice(), b"world"),
             _ => panic!("expected Text(world)"),
         }
         match &ev[6] {
-            Event::EndElement { name, .. } => assert!(name == "child" || name == "root"),
+            Event::EndElement { name, .. } => {
+                assert!(name.as_slice() == b"child" || name.as_slice() == b"root")
+            }
             _ => panic!("expected Text(world)"),
         }
     }
@@ -659,11 +650,14 @@ mod tests {
         assert_eq!(ev.len(), 2);
         match &ev[0] {
             Event::StartElement { name, attributes } => {
-                assert_eq!(name, "root");
+                assert_eq!(name.as_slice(), b"root");
                 assert_eq!(attributes.len(), 3);
-                assert_eq!(attributes[0], ("a".to_string(), "1".to_string()));
-                assert_eq!(attributes[1], ("b".to_string(), "2".to_string()));
-                assert_eq!(attributes[2], ("c".to_string(), "3".to_string()));
+                assert_eq!(attributes[0].0.as_slice(), b"a");
+                assert_eq!(attributes[0].1.as_slice(), b"1");
+                assert_eq!(attributes[1].0.as_slice(), b"b");
+                assert_eq!(attributes[1].1.as_slice(), b"2");
+                assert_eq!(attributes[2].0.as_slice(), b"c");
+                assert_eq!(attributes[2].1.as_slice(), b"3");
             }
             _ => panic!("expected StartElement(root)"),
         }
@@ -676,11 +670,13 @@ mod tests {
         assert_eq!(ev.len(), 2);
         match &ev[0] {
             Event::StartElement { name, attributes } => {
-                assert_eq!(name, "root");
+                assert_eq!(name.as_slice(), b"root");
                 // Order is preserved by parser
                 assert_eq!(attributes.len(), 2);
-                assert_eq!(attributes[0], ("a".to_string(), "1".to_string()));
-                assert_eq!(attributes[1], ("b".to_string(), "2".to_string()));
+                assert_eq!(attributes[0].0.as_slice(), b"a");
+                assert_eq!(attributes[0].1.as_slice(), b"1");
+                assert_eq!(attributes[1].0.as_slice(), b"b");
+                assert_eq!(attributes[1].1.as_slice(), b"2");
             }
             _ => panic!("expected StartElement(root)"),
         }
@@ -694,8 +690,8 @@ mod tests {
         match &ev[0] {
             Event::StartElement { attributes, .. } => {
                 assert_eq!(attributes.len(), 1);
-                assert_eq!(attributes[0].0, "a");
-                assert_eq!(attributes[0].1, "<>&\"'");
+                assert_eq!(attributes[0].0.as_slice(), b"a");
+                assert_eq!(attributes[0].1.as_slice(), b"&lt;&gt;&amp;&quot;&apos;");
             }
             _ => panic!("expected StartElement(root)"),
         }
@@ -707,7 +703,7 @@ mod tests {
         let ev = events_from(xml);
         assert_eq!(ev.len(), 3);
         match &ev[1] {
-            Event::Text(t) => assert_eq!(t, "hello world"),
+            Event::Text(t) => assert_eq!(t.as_slice(), b"hello world"),
             _ => panic!("expected Text(hello world)"),
         }
     }
@@ -755,7 +751,7 @@ mod tests {
         // Start(root), CData, End(root)
         assert_eq!(ev.len(), 3);
         match &ev[1] {
-            Event::CData(t) => assert_eq!(t, "some <weird> & text"),
+            Event::CData(t) => assert_eq!(t.as_slice(), b"some <weird> & text"),
             _ => panic!("expected CData"),
         }
     }
@@ -767,7 +763,7 @@ mod tests {
         // We should see only root/child/text events, PI skipped.
         assert_eq!(ev.len(), 5);
         match &ev[0] {
-            Event::StartElement { name, .. } => assert_eq!(name, "root"),
+            Event::StartElement { name, .. } => assert_eq!(name.as_slice(), b"root"),
             _ => panic!("expected StartElement(root)"),
         }
     }
@@ -805,8 +801,12 @@ mod tests {
         let ev = events_from(xml);
 
         // At minimum, we expect a Start(root) and an End(root) (parser may or may not emit child).
-        assert!(matches!(ev.first(), Some(Event::StartElement { name, .. }) if name == "root"));
-        assert!(matches!(ev.last(), Some(Event::EndElement { name, .. }) if name == "root"));
+        assert!(
+            matches!(ev.first(), Some(Event::StartElement { name, .. }) if name.as_slice() == b"root")
+        );
+        assert!(
+            matches!(ev.last(), Some(Event::EndElement { name, .. }) if name.as_slice() == b"root")
+        );
     }
 
     #[test]
@@ -824,7 +824,7 @@ mod tests {
         // in this MVP, read_text_until_lt will return a Text then EOF.
         assert_eq!(ev.len(), 1);
         match &ev[0] {
-            Event::Text(t) => assert_eq!(t, "   \n\t  "),
+            Event::Text(t) => assert_eq!(t.as_slice(), b"   \n\t  "),
             _ => panic!("expected single Text event"),
         }
     }

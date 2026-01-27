@@ -169,17 +169,30 @@ pub fn run_query<R: BufRead, Q: Query>(
         }
         match reader.next_event()? {
             Event::StartElement { name, attributes } => {
-                path.push(&name);
-                query.on_start(path.as_slice(), &name, &attributes);
+                // convert raw bytes to owned Strings for the Query trait
+                let name_str = String::from_utf8_lossy(&name).into_owned();
+                let attrs_conv: Vec<(String, String)> = attributes
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            String::from_utf8_lossy(k).into_owned(),
+                            String::from_utf8_lossy(v).into_owned(),
+                        )
+                    })
+                    .collect();
+                query.on_start(path.as_slice(), &name_str, &attrs_conv);
+                path.push(&name_str);
             }
             Event::EndElement { name, accumulated } => {
-                query.on_end(path.as_slice(), &name, &accumulated);
+                let name_str = String::from_utf8_lossy(&name).into_owned();
+                let accumulated_str = String::from_utf8_lossy(&accumulated).into_owned();
+                query.on_end(path.as_slice(), &name_str, &accumulated_str);
                 path.pop();
             }
             Event::Text(text) => {
-                // You might want to trim whitespace here; for MVP, pass through.
                 if !text.is_empty() {
-                    query.on_text(path.as_slice(), &text);
+                    let text_str = String::from_utf8_lossy(&text).into_owned();
+                    query.on_text(path.as_slice(), &text_str);
                 }
             }
             Event::Comment(_) | Event::CData(_) => {
@@ -198,7 +211,7 @@ pub fn run_query<R: BufRead, Q: Query>(
 mod tests {
     use super::*;
     use crate::reader::Event;
-    use std::io::{self, BufRead, Cursor};
+    use std::io::{self, BufRead};
 
     // --- PathStack tests ---
     #[test]
@@ -340,13 +353,13 @@ mod tests {
         // Compose events: Start(foo), Text(bar), End(foo)
         let events = vec![
             Event::StartElement {
-                name: "foo".to_string(),
+                name: b"foo".to_vec(),
                 attributes: vec![],
             },
-            Event::Text("bar".to_string()),
+            Event::Text(b"bar".to_vec()),
             Event::EndElement {
-                name: "foo".to_string(),
-                accumulated: "foobar".to_string(),
+                name: b"foo".to_vec(),
+                accumulated: b"foobar".to_vec(),
             },
         ];
         let mut reader = StubReader { events, idx: 0 };
@@ -367,16 +380,29 @@ mod tests {
                 let ev = reader.next_event()?;
                 match ev {
                     Event::StartElement { name, attributes } => {
-                        query.on_start(path.as_slice(), &name, &attributes);
-                        path.push(&name);
+                        let name_str = String::from_utf8_lossy(&name).into_owned();
+                        let attrs_conv: Vec<(String, String)> = attributes
+                            .iter()
+                            .map(|(k, v)| {
+                                (
+                                    String::from_utf8_lossy(k).into_owned(),
+                                    String::from_utf8_lossy(v).into_owned(),
+                                )
+                            })
+                            .collect();
+                        path.push(&name_str);
+                        query.on_start(path.as_slice(), &name_str, &attrs_conv);
                     }
                     Event::EndElement { name, accumulated } => {
-                        query.on_end(path.as_slice(), &name, &accumulated);
+                        let name_str = String::from_utf8_lossy(&name).into_owned();
+                        let accumulated_str = String::from_utf8_lossy(&accumulated).into_owned();
+                        query.on_end(path.as_slice(), &name_str, &accumulated_str);
                         path.pop();
                     }
                     Event::Text(text) => {
                         if !text.is_empty() {
-                            query.on_text(path.as_slice(), &text);
+                            let text_str = String::from_utf8_lossy(&text).into_owned();
+                            query.on_text(path.as_slice(), &text_str);
                         }
                     }
                     Event::Comment(_) | Event::CData(_) => {}
@@ -388,7 +414,7 @@ mod tests {
             Ok(())
         }
         run_query_stub(&mut reader, &mut query).unwrap();
-        assert_eq!(query.log[0], "start:foo:[]");
+        assert_eq!(query.log[0], "start:foo:[\"foo\"]");
         assert_eq!(query.log[1], "text:bar");
         assert!(query.log.iter().any(|l| l.starts_with("end:foo")));
     }
@@ -430,16 +456,29 @@ mod tests {
                 let ev = reader.next_event()?;
                 match ev {
                     Event::StartElement { name, attributes } => {
-                        path.push(&name);
-                        query.on_start(path.as_slice(), &name, &attributes);
+                        let name_str = String::from_utf8_lossy(&name).into_owned();
+                        let attrs_conv: Vec<(String, String)> = attributes
+                            .iter()
+                            .map(|(k, v)| {
+                                (
+                                    String::from_utf8_lossy(k).into_owned(),
+                                    String::from_utf8_lossy(v).into_owned(),
+                                )
+                            })
+                            .collect();
+                        path.push(&name_str);
+                        query.on_start(path.as_slice(), &name_str, &attrs_conv);
                     }
                     Event::EndElement { name, accumulated } => {
-                        query.on_end(path.as_slice(), &name, &accumulated);
+                        let name_str = String::from_utf8_lossy(&name).into_owned();
+                        let accumulated_str = String::from_utf8_lossy(&accumulated).into_owned();
+                        query.on_end(path.as_slice(), &name_str, &accumulated_str);
                         path.pop();
                     }
                     Event::Text(text) => {
                         if !text.is_empty() {
-                            query.on_text(path.as_slice(), &text);
+                            let text_str = String::from_utf8_lossy(&text).into_owned();
+                            query.on_text(path.as_slice(), &text_str);
                         }
                     }
                     Event::Comment(_) | Event::CData(_) => {}
