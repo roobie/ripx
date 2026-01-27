@@ -1,4 +1,5 @@
 use std::io::{self, BufRead};
+use std::mem;
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
@@ -8,6 +9,7 @@ pub enum Event {
     },
     EndElement {
         name: String,
+        accumulated: String,
     },
     Text(String),
     Comment(String),
@@ -29,6 +31,7 @@ pub struct Reader<R: BufRead> {
     finished: bool,
     // NEW: synthetic end-tags for empty elements (<tag/>)
     pending_end: Vec<String>,
+    accumulator: Vec<u8>,
 }
 
 impl<R: BufRead> Reader<R> {
@@ -41,7 +44,13 @@ impl<R: BufRead> Reader<R> {
             state: State::OutsideTag,
             finished: false,
             pending_end: Vec::new(),
+            accumulator: Vec::new(),
         }
+    }
+
+    fn get_accumulated(&mut self) -> String {
+        let bytes = mem::take(&mut self.accumulator); // leaves an empty Vec<u8> in place
+        String::from_utf8(bytes).unwrap() // TODO error handling
     }
 
     /// Try to resynchronize after an error.
@@ -105,7 +114,10 @@ impl<R: BufRead> Reader<R> {
     pub fn next_event(&mut self) -> io::Result<Event> {
         // If we have a synthetic end element to emit, do that first.
         if let Some(name) = self.pending_end.pop() {
-            return Ok(Event::EndElement { name });
+            return Ok(Event::EndElement {
+                name,
+                accumulated: self.get_accumulated(),
+            });
         }
 
         if self.finished {
@@ -116,6 +128,7 @@ impl<R: BufRead> Reader<R> {
             match self.state {
                 State::OutsideTag => {
                     let text = self.read_text_until_lt()?;
+                    self.accumulator.append(text.as_bytes().to_vec().as_mut());
                     if !text.is_empty() {
                         return Ok(Event::Text(text));
                     }
@@ -123,18 +136,24 @@ impl<R: BufRead> Reader<R> {
                         return Ok(Event::Eof);
                     }
                     self.pos += 1; // consume '<'
+                    self.accumulator = vec![b'<'];
                     self.state = State::InsideTag;
                 }
                 State::InsideTag => {
                     let c = self.peek_byte()?;
+                    self.accumulator.push(c);
                     match c {
                         b'/' => {
                             self.pos += 1; // consume '/'
                             let name = self.read_name()?;
+                            self.accumulator.append(name.as_bytes().to_vec().as_mut());
                             self.skip_spaces()?;
                             self.expect_byte(b'>')?;
                             self.state = State::OutsideTag;
-                            return Ok(Event::EndElement { name });
+                            return Ok(Event::EndElement {
+                                name,
+                                accumulated: self.get_accumulated(),
+                            });
                         }
                         b'!' => {
                             self.pos += 1; // consume '!'
@@ -287,6 +306,7 @@ impl<R: BufRead> Reader<R> {
             while self.pos < self.end {
                 let b = self.buf[self.pos];
                 if matches!(b, b' ' | b'\n' | b'\r' | b'\t') {
+                    self.accumulator.push(b);
                     self.pos += 1;
                     advanced = true;
                 } else {
@@ -499,7 +519,6 @@ mod tests {
     use std::io::Cursor;
 
     fn events_from(s: &str) -> Vec<Event> {
-        println!("{}", s);
         let cursor = Cursor::new(s.as_bytes());
         let mut reader = Reader::from_reader(cursor);
         let mut out = Vec::new();
@@ -540,7 +559,6 @@ mod tests {
     fn single_empty_element_no_attrs() {
         let xml = "<root></root>";
         let ev = events_from(xml);
-        println!("{:?}", ev);
         assert_eq!(ev.len(), 2);
         match &ev[0] {
             Event::StartElement { name, attributes } => {
@@ -550,7 +568,7 @@ mod tests {
             _ => panic!("expected StartElement"),
         }
         match &ev[1] {
-            Event::EndElement { name } => assert_eq!(name, "root"),
+            Event::EndElement { name, .. } => assert_eq!(name, "root"),
             _ => panic!("expected EndElement"),
         }
     }
@@ -595,7 +613,7 @@ mod tests {
             _ => panic!("expected Text(hello)"),
         }
         match &ev[3] {
-            Event::EndElement { name } => assert_eq!(name, "child"),
+            Event::EndElement { name, .. } => assert_eq!(name, "child"),
             _ => panic!("expected EndElement(child)"),
         }
         match &ev[4] {
@@ -607,7 +625,7 @@ mod tests {
             _ => panic!("expected Text(world)"),
         }
         match &ev[6] {
-            Event::EndElement { name } => assert!(name == "child" || name == "root"),
+            Event::EndElement { name, .. } => assert!(name == "child" || name == "root"),
             _ => panic!("expected Text(world)"),
         }
     }
@@ -766,7 +784,7 @@ mod tests {
 
         // At minimum, we expect a Start(root) and an End(root) (parser may or may not emit child).
         assert!(matches!(ev.first(), Some(Event::StartElement { name, .. }) if name == "root"));
-        assert!(matches!(ev.last(), Some(Event::EndElement { name }) if name == "root"));
+        assert!(matches!(ev.last(), Some(Event::EndElement { name, .. }) if name == "root"));
     }
 
     #[test]

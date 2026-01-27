@@ -32,9 +32,9 @@ pub trait Query {
 
     fn on_text(&mut self, path: &[String], text: &str);
 
-    fn on_end(&mut self, path: &[String], name: &str);
+    fn on_end(&mut self, path: &[String], name: &str, content: &str);
 
-    fn is_full(&mut self) -> bool;
+    fn is_done(&mut self) -> bool;
 }
 
 /// Very small path selector language:
@@ -86,6 +86,7 @@ pub struct PathQuery {
     max: usize,         // stop after this many
     count: usize,       // count accumulated matches
     done: bool,
+    // attrs: Vec<(String, String)>
 }
 
 impl PathQuery {
@@ -118,22 +119,22 @@ impl Query for PathQuery {
             if self.in_match == 0 {
                 self.buf.clear();
                 self.match_depth = path.len(); // depth of this element
-                self.count += 1;
             }
+            self.buf.push_str(name);
             self.in_match += 1;
         } else if self.in_match > 0 {
+            self.buf.push_str(name);
             self.in_match += 1;
         }
     }
 
     fn on_text(&mut self, _path: &[String], text: &str) {
-        self.count += 1;
         if self.in_match > 0 && !self.done {
             self.buf.push_str(text);
         }
     }
 
-    fn on_end(&mut self, path: &[String], _name: &str) {
+    fn on_end(&mut self, path: &[String], _name: &str, content: &str) {
         if self.done || self.in_match == 0 {
             return;
         }
@@ -143,7 +144,8 @@ impl Query for PathQuery {
         // leaving the root element of the match?
         if self.in_match == 0 && path.len() == self.match_depth {
             // one complete match collected in buf
-            println!("{}", self.buf.trim());
+            // println!("{}", self.buf.trim());
+            println!("{}", content);
             self.printed += 1;
             if self.printed >= self.max {
                 self.done = true;
@@ -151,8 +153,8 @@ impl Query for PathQuery {
         }
     }
 
-    fn is_full(&mut self) -> bool {
-        self.count >= self.max
+    fn is_done(&mut self) -> bool {
+        self.done
     }
 }
 
@@ -164,33 +166,28 @@ pub fn run_query<R: BufRead, Q: Query>(
     let mut path = PathStack::new();
 
     loop {
-        if query.is_full() {
+        if query.is_done() {
             break;
         }
-        println!("{:?}", path);
         match reader.next_event()? {
             Event::StartElement { name, attributes } => {
                 path.push(&name);
                 query.on_start(path.as_slice(), &name, &attributes);
             }
-            Event::EndElement { name } => {
-                println!("{:?}", path);
-                query.on_end(path.as_slice(), &name);
+            Event::EndElement { name, accumulated } => {
+                query.on_end(path.as_slice(), &name, &accumulated);
                 path.pop();
             }
             Event::Text(text) => {
-                println!("{:?}", path);
                 // You might want to trim whitespace here; for MVP, pass through.
                 if !text.is_empty() {
                     query.on_text(path.as_slice(), &text);
                 }
             }
             Event::Comment(_) | Event::CData(_) => {
-                println!("{:?}", path);
                 // Ignored by default; could be forwarded to query if needed.
             }
             Event::Eof => {
-                println!("{:?}", path);
                 break;
             }
         }
