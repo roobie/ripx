@@ -3,8 +3,9 @@ use std::io::Read;
 use crate::input_buffer::InputBuffer;
 use crate::scratch::ScratchBuffers;
 use crate::element_stack::ElementStack;
-use crate::attributes::{AttributeTable, Attributes};
+use crate::attributes::{AttributeTable, Attributes, NameBufferKind, InternalAttribute};
 use crate::tokenizer::{scan_name};
+use crate::element_stack::ElementFrame;
 
 /// Public parser limits (see ParserV2.md)
 #[derive(Debug, Clone)]
@@ -79,6 +80,7 @@ pub struct Parser<R: io::Read> {
     input: InputBuffer,
     scratch: ScratchBuffers,
     elem_stack: ElementStack,
+    pending_end: Option<ElementFrame>,
     attr_table: AttributeTable,
 }
 
@@ -114,6 +116,7 @@ impl<R: io::Read> Parser<R> {
             input,
             scratch,
             elem_stack,
+            pending_end: None,
             attr_table,
         }
     }
@@ -121,6 +124,13 @@ impl<R: io::Read> Parser<R> {
     pub fn next_event<'a>(&'a mut self) -> io::Result<Event<'a>> {
         // try to fill buffer
         let _ = self.input.fill_from(&mut self._reader)?;
+        // If there's a pending synthetic EndElement, emit it first.
+        if let Some(frame) = self.pending_end.take() {
+            let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+            let start = frame.name_start;
+            let end = start + frame.name_len;
+            return Ok(Event { event_type: EventType::EndElement, data: &self.scratch.name[start..end], is_continuation: false, error: None, attributes: attrs });
+        }
         let buf = self.input.as_slice();
         if buf.is_empty() {
             // EOF
@@ -165,6 +175,117 @@ impl<R: io::Read> Parser<R> {
                     self.input.consume(consumed);
                     let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
                     return Ok(Event { event_type: EventType::EndElement, data: &self.scratch.name[..to_copy], is_continuation: false, error: None, attributes: attrs });
+                }
+            }
+            // start tag: '<name ...>' (not comment, not end, not PI/DOCTYPE)
+            if buf.len() >= 2 && buf[1] != b'!' && buf[1] != b'/' && buf[1] != b'?' {
+                let rest = &buf[1..];
+                let (name_len, _delim) = scan_name(rest, self._limits.max_name_len);
+                if name_len == 0 {
+                    // malformed; consume '<' and return it as text
+                    self.input.consume(1);
+                    let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                    return Ok(Event { event_type: EventType::Text, data: b"<", is_continuation: false, error: None, attributes: attrs });
+                }
+                // If truncated by scan_name, advance to actual delimiter so trailing chars don't parse as attrs
+                let mut full_name_len = name_len;
+                if name_len == self._limits.max_name_len {
+                    while full_name_len < rest.len() {
+                        match rest[full_name_len] {
+                            b' ' | b'\t' | b'\r' | b'\n' | b'/' | b'>' | b'=' => break,
+                            _ => full_name_len += 1,
+                        }
+                    }
+                }
+
+                // parse attributes from the bytes after the name
+                let after_name = &rest[full_name_len..];
+                let (parsed_attrs, consumed_attrs, hit_limit) = crate::tokenizer::parse_attributes(
+                    after_name,
+                    self._limits.max_attr_name_len,
+                    self._limits.max_attr_value_len,
+                    self._limits.max_attributes,
+                );
+
+                // If attributes parser didn't find a closing '>' or '/>', treat as text fallback
+                if consumed_attrs == 0 && !after_name.iter().any(|&b| b == b'>' ) {
+                    self.input.consume(1);
+                    let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                    return Ok(Event { event_type: EventType::Text, data: b"<", is_continuation: false, error: None, attributes: attrs });
+                }
+
+                // total bytes to consume for the whole start tag
+                let total_consumed = 1 + full_name_len + consumed_attrs;
+
+                // prepare attribute table and scratch areas
+                self.attr_table.clear();
+                self.scratch.attr_name.clear();
+                self.scratch.attr_value.clear();
+
+                let mut too_many = false;
+                for (name_vec, val_vec) in parsed_attrs.into_iter() {
+                    if self.attr_table.len() >= self.attr_table.capacity {
+                        too_many = true;
+                        break;
+                    }
+                    let name_start = self.scratch.attr_name.len();
+                    let (copied_n, _trn) = self.scratch.push_attr_name(&name_vec);
+                    let name_len_copied = copied_n;
+                    let val_start = self.scratch.attr_value.len();
+                    let (copied_v, _trv) = self.scratch.push_attr_value(&val_vec);
+                    let val_len_copied = copied_v;
+                    let ia = InternalAttribute {
+                        name_buffer: NameBufferKind::AttrNameScratch,
+                        name_start,
+                        name_len: name_len_copied,
+                        value_buffer: NameBufferKind::AttrValueScratch,
+                        value_start: val_start,
+                        value_len: val_len_copied,
+                    };
+                    let _ = self.attr_table.push_entry(ia);
+                }
+
+                // If attribute parser hit limit or we detected overflow, emit Fault
+                if hit_limit || too_many {
+                    self.input.consume(total_consumed);
+                    let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                    return Ok(Event { event_type: EventType::Fault, data: &[], is_continuation: false, error: Some(ErrorCode::TooManyAttributes), attributes: attrs });
+                }
+
+                // Determine if self-closing by looking at the consumed region
+                let tag_region = &buf[1 + full_name_len .. 1 + full_name_len + consumed_attrs];
+                let self_closing = tag_region.ends_with(b"/>");
+
+                // push element name onto stack (copy into scratch.name)
+                // use the truncated name portion (name_len)
+                let name_bytes = &rest[..name_len];
+                match self.elem_stack.push_name(&mut self.scratch, name_bytes, self._limits.max_name_len) {
+                    Ok(()) => {
+                        // if self-closing, pop and save pending end
+                        let frame = if self_closing {
+                            // pop the pushed frame and keep a copy for emission
+                            let f = self.elem_stack.pop().unwrap();
+                            let emit_frame = ElementFrame { name_start: f.name_start, name_len: f.name_len };
+                            self.pending_end = Some(f);
+                            emit_frame
+                        } else {
+                            // copy top for event emission
+                            let top = self.elem_stack.top().unwrap();
+                            ElementFrame { name_start: top.name_start, name_len: top.name_len }
+                        };
+                        // consume tag bytes
+                        self.input.consume(total_consumed);
+                        let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                        let start = frame.name_start;
+                        let end = start + frame.name_len;
+                        return Ok(Event { event_type: EventType::StartElement, data: &self.scratch.name[start..end], is_continuation: false, error: None, attributes: attrs });
+                    }
+                    Err(()) => {
+                        // depth exceeded
+                        self.input.consume(total_consumed);
+                        let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                        return Ok(Event { event_type: EventType::Fault, data: &[], is_continuation: false, error: Some(ErrorCode::DepthLimitExceeded), attributes: attrs });
+                    }
                 }
             }
             // Start tag or other: for now, treat as text delimiter and consume '<'

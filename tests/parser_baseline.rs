@@ -71,12 +71,12 @@ fn mixed_text_and_tag_split() {
     assert_eq!(ev1.data, b"a");
 
     let ev2 = p.next_event().expect("lt");
-    assert_eq!(ev2.event_type, ripx::parser::EventType::Text);
-    assert_eq!(ev2.data, b"<");
+    assert_eq!(ev2.event_type, ripx::parser::EventType::StartElement);
+    assert_eq!(ev2.data, b"b");
 
     let ev3 = p.next_event().expect("rest");
     assert_eq!(ev3.event_type, ripx::parser::EventType::Text);
-    assert_eq!(ev3.data, b"b>c");
+    assert_eq!(ev3.data, b"c");
 
     let ev4 = p.next_event().expect("eof");
     assert_eq!(ev4.event_type, ripx::parser::EventType::Eof);
