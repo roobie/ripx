@@ -78,8 +78,12 @@ fn mixed_text_and_tag_split() {
     assert_eq!(ev3.event_type, ripx::parser::EventType::Text);
     assert_eq!(ev3.data, b"c");
 
-    let ev4 = p.next_event().expect("eof");
-    assert_eq!(ev4.event_type, ripx::parser::EventType::Eof);
+    let ev4 = p.next_event().expect("fault");
+    assert_eq!(ev4.event_type, ripx::parser::EventType::Fault);
+    assert_eq!(ev4.error, Some(ripx::parser::ErrorCode::UnclosedElement));
+
+    let ev5 = p.next_event().expect("eof");
+    assert_eq!(ev5.event_type, ripx::parser::EventType::Eof);
 }
 
 #[test]

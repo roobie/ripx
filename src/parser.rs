@@ -81,6 +81,7 @@ pub struct Parser<R: io::Read> {
     scratch: ScratchBuffers,
     elem_stack: ElementStack,
     pending_end: Option<ElementFrame>,
+    eof_fault_emitted: bool,
     attr_table: AttributeTable,
 }
 
@@ -117,6 +118,7 @@ impl<R: io::Read> Parser<R> {
             scratch,
             elem_stack,
             pending_end: None,
+            eof_fault_emitted: false,
             attr_table,
         }
     }
@@ -133,7 +135,12 @@ impl<R: io::Read> Parser<R> {
         }
         let buf = self.input.as_slice();
         if buf.is_empty() {
-            // EOF
+            // EOF: if there are unclosed elements, emit a single UnclosedElement fault first
+            if self.elem_stack.len() > 0 && !self.eof_fault_emitted {
+                self.eof_fault_emitted = true;
+                let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                return Ok(Event { event_type: EventType::Fault, data: &[], is_continuation: false, error: Some(ErrorCode::UnclosedElement), attributes: attrs });
+            }
             let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
             return Ok(Event { event_type: EventType::Eof, data: &[], is_continuation: false, error: None, attributes: attrs });
         }
