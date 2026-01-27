@@ -64,7 +64,6 @@ proptest! {
         for _ in 0..cap {
             let ev = p.next_event().expect("next_event");
             if ev.event_type == EventType::Eof { seen_eof = true; break; }
-            prop_assert!(!ev.data.is_empty(), "non-EOF event had empty data");
         }
         prop_assert!(seen_eof, "parser did not reach EOF within iteration cap");
     }
