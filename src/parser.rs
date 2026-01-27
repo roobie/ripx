@@ -203,6 +203,34 @@ impl<R: io::Read> Parser<R> {
                             _ => full_name_len += 1,
                         }
                     }
+                    // If the actual name extends beyond the configured max, emit NameTooLong fault
+                    if full_name_len > name_len {
+                        // prepare optional payload
+                        let payload: &[u8];
+                        if self._limits.include_fault_payload {
+                            self.scratch.text.clear();
+                            let available = buf.len().min(self.scratch.text.capacity());
+                            let _ = self.scratch.push_text_chunk(&buf[..available]);
+                            payload = &self.scratch.text[..];
+                        } else {
+                            payload = &[];
+                        }
+                        // consume the examined tag bytes ("<" + full name) then skip until next '<' to recover
+                        self.input.consume(1 + full_name_len);
+                        loop {
+                            let _ = self.input.fill_from(&mut self._reader)?;
+                            let b2 = self.input.as_slice();
+                            if b2.is_empty() { break; }
+                            if let Some(pos) = b2.iter().position(|&c| c == b'<') {
+                                if pos > 0 { self.input.consume(pos); }
+                                break;
+                            } else {
+                                let n = b2.len(); self.input.consume(n);
+                            }
+                        }
+                        let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                        return Ok(Event { event_type: EventType::Fault, data: payload, is_continuation: false, error: Some(ErrorCode::NameTooLong), attributes: attrs });
+                    }
                 }
 
                 // parse attributes from the bytes after the name

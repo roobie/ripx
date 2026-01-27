@@ -175,3 +175,39 @@ fn too_many_attributes_with_payload() {
     let ev2 = p.next_event().expect("eof");
     assert_eq!(ev2.event_type, ripx::parser::EventType::Eof);
 }
+
+
+#[test]
+fn name_too_long_no_payload() {
+    let mut limits = default_limits();
+    limits.max_name_len = 3;
+    limits.include_fault_payload = false;
+    let input = Cursor::new(b"<abcdef>".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let ev = p.next_event().expect("fault");
+    assert_eq!(ev.event_type, ripx::parser::EventType::Fault);
+    assert_eq!(ev.error, Some(ripx::parser::ErrorCode::NameTooLong));
+    assert_eq!(ev.data.len(), 0);
+
+    let ev2 = p.next_event().expect("eof");
+    assert_eq!(ev2.event_type, ripx::parser::EventType::Eof);
+}
+
+
+#[test]
+fn name_too_long_with_payload() {
+    let mut limits = default_limits();
+    limits.max_name_len = 3;
+    limits.include_fault_payload = true;
+    let input = Cursor::new(b"<abcdef>rest".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let ev = p.next_event().expect("fault");
+    assert_eq!(ev.event_type, ripx::parser::EventType::Fault);
+    assert_eq!(ev.error, Some(ripx::parser::ErrorCode::NameTooLong));
+    assert!(ev.data.len() > 0);
+
+    let ev2 = p.next_event().expect("eof");
+    assert_eq!(ev2.event_type, ripx::parser::EventType::Eof);
+}
