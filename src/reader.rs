@@ -375,6 +375,12 @@ impl<R: BufRead> Reader<R> {
                     self.pos += 1;
                     self.accumulator.push(quote);
                     return Ok((name, out));
+                } else if b == b'<' {
+                    // Do not consume '<' inside attribute value; treat as error to allow recovery.
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unexpected '<' in attribute value",
+                    ));
                 } else {
                     out.push(b);
                     self.accumulator.push(b);
