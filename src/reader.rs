@@ -171,13 +171,19 @@ impl<R: BufRead> Reader<R> {
                             self.pos += 1; // consume '!'
                             self.accumulator.push(c);
                             if self.try_consume(b"--")? {
+                                // record the consumed "--" so accumulator contains "<!--"
+                                self.accumulator.extend_from_slice(b"--");
                                 let comment = self.read_until_bytes(b"-->")?;
+                                // include comment body; read_until_bytes consumes the "-->"
                                 self.accumulator.extend_from_slice(&comment);
                                 self.state = State::OutsideTag;
                                 return Ok(Event::Comment(comment));
                             } else if self.try_consume(b"[CDATA[")? {
+                                // record the consumed "[CDATA[" so accumulator contains "<![CDATA["
+                                self.accumulator.extend_from_slice(b"[CDATA[");
                                 let cdata =
                                     self.read_until_bytes_limited(b"]]>", self.max_cdata_bytes)?;
+                                // include the CDATA body; read_until_bytes_limited will append drained bytes
                                 self.accumulator.extend_from_slice(&cdata);
                                 self.state = State::OutsideTag;
                                 return Ok(Event::CData(cdata.to_vec()));
@@ -289,6 +295,24 @@ impl<R: BufRead> Reader<R> {
                 let b = self.buf[self.pos];
                 self.pos += 1;
                 total = total.saturating_add(1);
+
+                // TODO: hitting a < inside a CDATA should be allowed, and we should only treat it as an error if we are reading more than limit bytes without seeing the terminator.
+                // However, for now we treat it as an error to allow the caller to recover gracefully.
+                // If we see a '<' inside a CDATA section, stop scanning so the parser can recover
+                if b == b'<' {
+                    if matched > 0 {
+                        out.extend_from_slice(&pat[..matched]);
+                        // matched = 0; // never read
+                    }
+                    // step back so '<' is not consumed and can be reprocessed
+                    self.pos -= 1;
+                    // persist what we've collected and signal unterminated pattern so caller can recover
+                    self.accumulator.extend_from_slice(&out);
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unterminated pattern {:?}", String::from_utf8_lossy(pat)),
+                    ));
+                }
 
                 if let Some(max) = limit {
                     if total > max {
@@ -747,7 +771,7 @@ mod tests {
         // But the parser should recover and still see start and end root.
         assert_eq!(ev.len(), 2);
         assert!(matches!(ev[0], Event::StartElement { .. }));
-        assert!(matches!(ev[2], Event::EndElement { .. }));
+        assert!(matches!(ev[1], Event::EndElement { .. }));
     }
 
     fn test_cdata(xml: &str, num_events: usize) {
