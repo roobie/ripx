@@ -60,6 +60,15 @@ impl ElementStack {
         self.frames.pop()
     }
 
+    pub fn truncate_scratch(&self, scratch: &mut ScratchBuffers) {
+        // Truncate scratch buffer to match current stack depth
+        if let Some(top) = self.frames.last() {
+            scratch.name.truncate(top.name_start + top.name_len);
+        } else {
+            scratch.name.clear();
+        }
+    }
+
     pub fn top(&self) -> Option<&ElementFrame> {
         self.frames.last()
     }
@@ -98,6 +107,30 @@ mod tests {
         assert_eq!(s.len(), 2);
         s.pop();
         assert_eq!(s.len(), 1);
+    }
+
+    #[test]
+    fn stack_truncates_scratch() {
+        let mut scratch = ScratchBuffers::with_limits(20, 10, 10, 10, 10, 10, 10);
+        let mut stack = ElementStack::with_capacity(5);
+
+        // Push some names and build up the scratch buffer
+        stack.push_name(&mut scratch, b"root", 10).unwrap();
+        assert_eq!(scratch.name.len(), 4); // "root"
+
+        stack.push_name(&mut scratch, b"child", 10).unwrap();
+        assert_eq!(scratch.name.len(), 9); // "rootchild"
+
+        // Pop child
+        stack.pop();
+        // Truncate should remove child's name
+        stack.truncate_scratch(&mut scratch);
+        assert_eq!(scratch.name.len(), 4); // back to "root"
+
+        // Pop root
+        stack.pop();
+        stack.truncate_scratch(&mut scratch);
+        assert_eq!(scratch.name.len(), 0); // empty
     }
 
     #[test]

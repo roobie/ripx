@@ -1,5 +1,4 @@
 use std::io;
-use std::io::Read;
 use crate::input_buffer::InputBuffer;
 use crate::scratch::ScratchBuffers;
 use crate::element_stack::ElementStack;
@@ -134,6 +133,9 @@ impl<R: io::Read> Parser<R> {
             let end = start + frame.name_len;
             return Ok(Event { event_type: EventType::EndElement, data: &self.scratch.name[start..end], is_continuation: false, error: None, attributes: attrs });
         }
+        // Clean up scratch buffer to match current stack depth
+        // This reclaims space from previously emitted events
+        self.elem_stack.truncate_scratch(&mut self.scratch);
         let buf = self.input.as_slice();
         if buf.is_empty() {
             // EOF: if there are unclosed elements, emit a single UnclosedElement fault first

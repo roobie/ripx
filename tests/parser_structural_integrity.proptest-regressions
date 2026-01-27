@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 433841a56649ca1dfadfd991410013a47b44629597d57bbf89251c22891759a4 # shrinks to tree = Element("a", [])
+cc 5e91402c2e208666468980f42c05acf8b4f728e752a9717ea85c6a670103e10d # shrinks to tree = Element("a", [Element("aaaa", [Element("aa", [Element("aaa", [])])]), Element("aaaa", [Element("aaa", [Element("aaaa", []), Element("aaa", [])]), Element("aa", [Element("aaaaaa", []), Element("aaaaaa", [])]), Element("aaaaa", [])]), Element("aaa", [Element("aaa", []), Element("aaaaaa", []), Element("aaaaaa", [Element("aaaa", [])])])])
