@@ -254,9 +254,31 @@ impl<R: io::Read> Parser<R> {
 
                 // If attribute parser hit limit or we detected overflow, emit Fault
                 if hit_limit || too_many {
+                    // include payload if requested (copy a prefix of the current buffer)
+                    let payload: &[u8];
+                    if self._limits.include_fault_payload {
+                        self.scratch.text.clear();
+                        let available = buf.len().min(self.scratch.text.capacity());
+                        let _ = self.scratch.push_text_chunk(&buf[..available]);
+                        payload = &self.scratch.text[..];
+                    } else {
+                        payload = &[];
+                    }
+                    // consume the start-tag bytes we looked at, then skip forward until next '<' to recover
                     self.input.consume(total_consumed);
+                    loop {
+                        let _ = self.input.fill_from(&mut self._reader)?;
+                        let b2 = self.input.as_slice();
+                        if b2.is_empty() { break; }
+                        if let Some(pos) = b2.iter().position(|&c| c == b'<') {
+                            if pos > 0 { self.input.consume(pos); }
+                            break;
+                        } else {
+                            let n = b2.len(); self.input.consume(n);
+                        }
+                    }
                     let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
-                    return Ok(Event { event_type: EventType::Fault, data: &[], is_continuation: false, error: Some(ErrorCode::TooManyAttributes), attributes: attrs });
+                    return Ok(Event { event_type: EventType::Fault, data: payload, is_continuation: false, error: Some(ErrorCode::TooManyAttributes), attributes: attrs });
                 }
 
                 // Determine if self-closing by looking at the consumed region
