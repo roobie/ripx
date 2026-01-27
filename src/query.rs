@@ -298,9 +298,9 @@ mod tests {
         }
     }
 
-        trait StubNextEvent {
-            fn next_event(&mut self) -> io::Result<Event>;
-        }
+    trait StubNextEvent {
+        fn next_event(&mut self) -> io::Result<Event>;
+    }
 
     #[test]
     fn run_query_dispatches_events_and_stops_on_done() {
@@ -367,8 +367,8 @@ mod tests {
                 let ev = reader.next_event()?;
                 match ev {
                     Event::StartElement { name, attributes } => {
-                        path.push(&name);
                         query.on_start(path.as_slice(), &name, &attributes);
+                        path.push(&name);
                     }
                     Event::EndElement { name, accumulated } => {
                         query.on_end(path.as_slice(), &name, &accumulated);
