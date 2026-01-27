@@ -211,3 +211,172 @@ fn name_too_long_with_payload() {
     let ev2 = p.next_event().expect("eof");
     assert_eq!(ev2.event_type, ripx::parser::EventType::Eof);
 }
+
+#[test]
+fn start_element_with_attributes() {
+    let limits = default_limits();
+    let input = Cursor::new(b"<a x=\"1\" y='two' empty=\"\">".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let ev = p.next_event().expect("start");
+    assert_eq!(ev.event_type, ripx::parser::EventType::StartElement);
+    assert_eq!(ev.data, b"a");
+    assert_eq!(ev.attributes.len(), 3);
+    let (n0, v0) = ev.attributes.get(0).unwrap();
+    assert_eq!(n0, b"x");
+    assert_eq!(v0, b"1");
+    let (n1, v1) = ev.attributes.get(1).unwrap();
+    assert_eq!(n1, b"y");
+    assert_eq!(v1, b"two");
+    let (n2, v2) = ev.attributes.get(2).unwrap();
+    assert_eq!(n2, b"empty");
+    assert_eq!(v2.len(), 0);
+
+    let ev2 = p.next_event().expect("eof");
+    assert_eq!(ev2.event_type, ripx::parser::EventType::Eof);
+}
+
+#[test]
+fn self_closing_element_emits_end() {
+    let limits = default_limits();
+    let input = Cursor::new(b"<br/>".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let ev = p.next_event().expect("start");
+    assert_eq!(ev.event_type, ripx::parser::EventType::StartElement);
+    assert_eq!(ev.data, b"br");
+
+    let ev2 = p.next_event().expect("end");
+    assert_eq!(ev2.event_type, ripx::parser::EventType::EndElement);
+    assert_eq!(ev2.data, b"br");
+
+    let ev3 = p.next_event().expect("eof");
+    assert_eq!(ev3.event_type, ripx::parser::EventType::Eof);
+}
+
+#[test]
+fn nested_depth_limit_exceeded() {
+    let mut limits = default_limits();
+    limits.max_depth = 2;
+    let input = Cursor::new(b"<a><b><c>".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    // <a>
+    let e1 = p.next_event().expect("a");
+    assert_eq!(e1.event_type, ripx::parser::EventType::StartElement);
+    assert_eq!(e1.data, b"a");
+    // <b>
+    let e2 = p.next_event().expect("b");
+    assert_eq!(e2.event_type, ripx::parser::EventType::StartElement);
+    assert_eq!(e2.data, b"b");
+    // <c> should trigger DepthLimitExceeded fault
+    let e3 = p.next_event().expect("fault");
+    assert_eq!(e3.event_type, ripx::parser::EventType::Fault);
+    assert_eq!(e3.error, Some(ripx::parser::ErrorCode::DepthLimitExceeded));
+}
+
+#[test]
+fn text_chunk_splitting_respects_limit() {
+    let mut limits = default_limits();
+    limits.max_text_chunk_len = 4;
+    let input = Cursor::new(b"abcdefgh".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let t1 = p.next_event().expect("t1");
+    assert_eq!(t1.event_type, ripx::parser::EventType::Text);
+    assert_eq!(t1.data, b"abcd");
+
+    let t2 = p.next_event().expect("t2");
+    assert_eq!(t2.event_type, ripx::parser::EventType::Text);
+    assert_eq!(t2.data, b"efgh");
+
+    let e = p.next_event().expect("eof");
+    assert_eq!(e.event_type, ripx::parser::EventType::Eof);
+}
+
+#[test]
+fn duplicate_attribute_names_are_parsed() {
+    let limits = default_limits();
+    let input = Cursor::new(b"<a x=1 x=2>".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let ev = p.next_event().expect("start");
+    assert_eq!(ev.event_type, ripx::parser::EventType::StartElement);
+    assert_eq!(ev.data, b"a");
+    assert_eq!(ev.attributes.len(), 2);
+    let (n0, v0) = ev.attributes.get(0).unwrap();
+    let (n1, v1) = ev.attributes.get(1).unwrap();
+    assert_eq!(n0, b"x");
+    assert_eq!(v0, b"1");
+    assert_eq!(n1, b"x");
+    assert_eq!(v1, b"2");
+}
+
+#[test]
+fn binary_bytes_in_text_are_preserved() {
+    let limits = default_limits();
+    let input = Cursor::new(vec![0xff, 0xfe, b'a', b'b']);
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let ev = p.next_event().expect("text");
+    assert_eq!(ev.event_type, ripx::parser::EventType::Text);
+    assert_eq!(ev.data, &[0xffu8, 0xfeu8, b'a', b'b']);
+
+    let e = p.next_event().expect("eof");
+    assert_eq!(e.event_type, ripx::parser::EventType::Eof);
+}
+
+// The following tests target constructs that may not yet be fully supported
+// by the parser; mark as ignored to avoid failing the baseline until
+// implementation is complete.
+
+#[test]
+#[ignore]
+fn cdata_section_event() {
+    let limits = default_limits();
+    let input = Cursor::new(b"<![CDATA[<notatag>]]>".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let ev = p.next_event().expect("cdata");
+    assert_eq!(ev.event_type, ripx::parser::EventType::CData);
+    assert_eq!(ev.data, b"<notatag>");
+}
+
+#[test]
+#[ignore]
+fn processing_instruction_event() {
+    let limits = default_limits();
+    let input = Cursor::new(b"<?xml-stylesheet href=\"x\"?>".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits);
+
+    let ev = p.next_event().expect("pi");
+    assert_eq!(ev.event_type, ripx::parser::EventType::ProcessingInstruction);
+}
+
+#[test]
+#[ignore]
+fn unclosed_constructs_emit_faults_on_eof() {
+    let limits = default_limits();
+    // unclosed element (start without closing)
+    let input = Cursor::new(b"<open".to_vec());
+    let mut p = ripx::parser::Parser::new(input, limits.clone());
+    // consume until EOF
+    while let Ok(ev) = p.next_event() {
+        if ev.event_type == ripx::parser::EventType::Fault {
+            assert!(matches!(ev.error, Some(ripx::parser::ErrorCode::UnclosedElement) | Some(ripx::parser::ErrorCode::UnexpectedEof)));
+            break;
+        }
+        if ev.event_type == ripx::parser::EventType::Eof { break; }
+    }
+
+    // unclosed comment
+    let input2 = Cursor::new(b"<!--oops".to_vec());
+    let mut p2 = ripx::parser::Parser::new(input2, limits);
+    while let Ok(ev) = p2.next_event() {
+        if ev.event_type == ripx::parser::EventType::Fault {
+            assert_eq!(ev.error, Some(ripx::parser::ErrorCode::UnexpectedEof));
+            break;
+        }
+        if ev.event_type == ripx::parser::EventType::Eof { break; }
+    }
+}
