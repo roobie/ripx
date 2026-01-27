@@ -235,15 +235,17 @@ impl<R: io::Read> Parser<R> {
 
                 // parse attributes from the bytes after the name
                 let after_name = &rest[full_name_len..];
-                let (parsed_attrs, consumed_attrs, hit_limit) = crate::tokenizer::parse_attributes(
+                    let (parsed_attrs, consumed_attrs, hit_limit, name_trunc, value_trunc) = crate::tokenizer::parse_attributes(
                     after_name,
                     self._limits.max_attr_name_len,
                     self._limits.max_attr_value_len,
                     self._limits.max_attributes,
                 );
 
-                // If attributes parser didn't find a closing '>' or '/>', treat as text fallback
-                if consumed_attrs == 0 && !after_name.iter().any(|&b| b == b'>' ) {
+                // If attributes parser didn't find a closing '>' or '/>', treat as text fallback.
+                // Note: parse_attributes may consume whitespace even when no attributes were parsed,
+                // so check parsed_attrs.is_empty() rather than consumed_attrs == 0.
+                if parsed_attrs.is_empty() && !after_name.iter().any(|&b| b == b'>' ) {
                     self.input.consume(1);
                     let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
                     return Ok(Event { event_type: EventType::Text, data: b"<", is_continuation: false, error: None, attributes: attrs });
@@ -251,6 +253,36 @@ impl<R: io::Read> Parser<R> {
 
                 // total bytes to consume for the whole start tag
                 let total_consumed = 1 + full_name_len + consumed_attrs;
+
+                // If any attribute name or value was truncated by limits, emit appropriate Fault
+                if name_trunc || value_trunc {
+                    // choose error code: prefer AttributeNameTooLong if name_trunc
+                    let err = if name_trunc { ErrorCode::AttributeNameTooLong } else { ErrorCode::AttributeValueTooLong };
+                    let payload: &[u8];
+                    if self._limits.include_fault_payload {
+                        self.scratch.text.clear();
+                        let available = buf.len().min(self.scratch.text.capacity());
+                        let _ = self.scratch.push_text_chunk(&buf[..available]);
+                        payload = &self.scratch.text[..];
+                    } else {
+                        payload = &[];
+                    }
+                    // consume inspected bytes and skip to next '<' to recover
+                    self.input.consume(total_consumed);
+                    loop {
+                        let _ = self.input.fill_from(&mut self._reader)?;
+                        let b2 = self.input.as_slice();
+                        if b2.is_empty() { break; }
+                        if let Some(pos) = b2.iter().position(|&c| c == b'<') {
+                            if pos > 0 { self.input.consume(pos); }
+                            break;
+                        } else {
+                            let n = b2.len(); self.input.consume(n);
+                        }
+                    }
+                    let attrs = Attributes::from_parts(self.attr_table.as_slice(), self.input.as_slice(), &self.scratch);
+                    return Ok(Event { event_type: EventType::Fault, data: payload, is_continuation: false, error: Some(err), attributes: attrs });
+                }
 
                 // prepare attribute table and scratch areas
                 self.attr_table.clear();

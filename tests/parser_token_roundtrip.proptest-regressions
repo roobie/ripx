@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 51374373bd29ee55b821a49d46d9c2c5cd6336f84193d42c7ea29d258eeb84b9 # shrinks to bytes = [60, 0, 9], max_depth = 1, max_attributes = 1, max_name_len = 1, max_attr_name_len = 1, max_attr_value_len = 1, max_text_chunk_len = 1, max_comment_chunk_len = 1, max_cdata_chunk_len = 1, max_pi_chunk_len = 1
+cc 4c759f9e7833dba0a43a2c6034cde2b7f4d411874b23521131c05fdacef0f5fa # shrinks to bytes = [60, 11, 47, 62], max_depth = 1, max_attributes = 1, max_name_len = 1, max_attr_name_len = 1, max_attr_value_len = 1, max_text_chunk_len = 1, max_comment_chunk_len = 1, max_cdata_chunk_len = 1, max_pi_chunk_len = 1

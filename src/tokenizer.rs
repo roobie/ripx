@@ -157,10 +157,12 @@ pub fn parse_attributes(
     max_name_len: usize,
     max_value_len: usize,
     max_attrs: usize,
-) -> (Vec<(Vec<u8>, Vec<u8>)>, usize, bool) {
+) -> (Vec<(Vec<u8>, Vec<u8>)>, usize, bool, bool, bool) {
     let mut out = Vec::new();
     let mut consumed = 0usize;
     let mut hit_limit = false;
+    let mut name_truncated_any = false;
+    let mut value_truncated_any = false;
 
     // helper to skip ASCII whitespace
     fn skip_ws(s: &[u8]) -> (usize, &[u8]) {
@@ -213,6 +215,9 @@ pub fn parse_attributes(
                     _ => full_name_len += 1,
                 }
             }
+            if full_name_len > name_len {
+                name_truncated_any = true;
+            }
         }
         let name = buf[..name_len].to_vec();
         buf = &buf[full_name_len..];
@@ -258,6 +263,9 @@ pub fn parse_attributes(
                         }
                         full_vlen += 1;
                     }
+                    if full_vlen > vlen {
+                        value_truncated_any = true;
+                    }
                 }
                 if vlen >= 2 {
                     value.extend_from_slice(&buf[1..vlen - 1]);
@@ -270,6 +278,9 @@ pub fn parse_attributes(
                             b' ' | b'\t' | b'\r' | b'\n' | b'>' | b'/' => break,
                             _ => full_vlen += 1,
                         }
+                    }
+                    if full_vlen > vlen {
+                        value_truncated_any = true;
                     }
                 }
                 value.extend_from_slice(&buf[..vlen]);
@@ -286,7 +297,7 @@ pub fn parse_attributes(
         // continue parsing
     }
 
-    (out, consumed, hit_limit)
+    (out, consumed, hit_limit, name_truncated_any, value_truncated_any)
 }
 #[cfg(test)]
 mod tests {
@@ -371,7 +382,7 @@ mod tests {
     #[test]
     fn parse_attributes_basic_and_self_closing() {
         let buf = b" a='one' b=two/>rest";
-        let (attrs, consumed, hit) = parse_attributes(buf, 100, 100, 10);
+        let (attrs, consumed, hit, _name_trunc, _val_trunc) = parse_attributes(buf, 100, 100, 10);
         assert!(!hit);
         assert_eq!(attrs.len(), 2);
         assert_eq!(attrs[0].0, b"a".to_vec());
@@ -385,7 +396,7 @@ mod tests {
     #[test]
     fn parse_attributes_truncate_value_and_name() {
         let buf = b" longname=\"abcdefghijklmnop\" >";
-        let (attrs, consumed, hit) = parse_attributes(buf, 6, 5, 10);
+        let (attrs, consumed, hit, _name_trunc, _val_trunc) = parse_attributes(buf, 6, 5, 10);
         assert!(!hit);
         assert_eq!(attrs.len(), 1);
         // name must be truncated to at most max 6
@@ -399,7 +410,7 @@ mod tests {
     #[test]
     fn parse_attributes_max_attrs_limit() {
         let buf = b" a=1 b=2 c=3 >";
-        let (attrs, _consumed, hit) = parse_attributes(buf, 100, 100, 2);
+        let (attrs, _consumed, hit, _name_trunc, _val_trunc) = parse_attributes(buf, 100, 100, 2);
         assert!(hit);
         assert_eq!(attrs.len(), 2);
     }
@@ -407,7 +418,7 @@ mod tests {
     #[test]
     fn parse_attributes_name_without_value() {
         let buf = b" a b='c' >";
-        let (attrs, _consumed, hit) = parse_attributes(buf, 100, 100, 10);
+        let (attrs, _consumed, hit, _name_trunc, _val_trunc) = parse_attributes(buf, 100, 100, 10);
         assert!(!hit);
         assert_eq!(attrs.len(), 2);
         assert_eq!(attrs[0].0, b"a".to_vec());
