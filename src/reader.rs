@@ -181,12 +181,19 @@ impl<R: BufRead> Reader<R> {
                             } else if self.try_consume(b"[CDATA[")? {
                                 // record the consumed "[CDATA[" so accumulator contains "<![CDATA["
                                 self.accumulator.extend_from_slice(b"[CDATA[");
-                                let cdata =
-                                    self.read_until_bytes_limited(b"]]>", self.max_cdata_bytes)?;
-                                // include the CDATA body; read_until_bytes_limited will append drained bytes
-                                self.accumulator.extend_from_slice(&cdata);
-                                self.state = State::OutsideTag;
-                                return Ok(Event::CData(cdata.to_vec()));
+                                match self.read_until_bytes_limited(b"]]>", self.max_cdata_bytes) {
+                                    Ok(cdata) => {
+                                        // append the CDATA body and the terminator to the accumulator so it reflects the original stream
+                                        self.accumulator.extend_from_slice(&cdata);
+                                        self.accumulator.extend_from_slice(b"]]>");
+                                        self.state = State::OutsideTag;
+                                        return Ok(Event::CData(cdata.to_vec()));
+                                    }
+                                    Err(e) => {
+                                        // propagate error so caller can recover
+                                        return Err(e);
+                                    }
+                                }
                             } else {
                                 self.skip_until_byte(b'>')?;
                                 self.accumulator.push(b'>');
