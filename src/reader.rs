@@ -69,6 +69,8 @@ impl<R: BufRead> Reader<R> {
             while self.pos < self.end {
                 let b = self.buf[self.pos];
                 if b != b'<' {
+                    // record skipped bytes so accumulator reflects the original stream
+                    self.accumulator.push(b);
                     self.pos += 1;
                     continue;
                 }
@@ -104,7 +106,8 @@ impl<R: BufRead> Reader<R> {
                     return Ok(());
                 }
 
-                // Not a recognizable construct, skip this '<' and continue scanning.
+                // Not a recognizable construct, record the skipped '<' and continue scanning.
+                self.accumulator.push(b'<');
                 self.pos += 1;
             }
         }
@@ -611,6 +614,57 @@ mod tests {
     fn broken_tag_recovery_4() {
         let xml = "<root><broken a=\"</root>";
         test_broken(xml);
+    }
+    #[test]
+    fn broken_tag_recovery_5() {
+        let xml = "<root><broken a=\"\"</root>";
+        test_broken(xml);
+    }
+    #[test]
+    fn broken_tag_recovery_6() {
+        let xml = "<root><broken a=/</root>";
+        test_broken(xml);
+    }
+    #[test]
+    fn broken_tag_recovery_7() {
+        let xml = "<root><broken a=\"/</root>";
+        test_broken(xml);
+    }
+    #[test]
+    fn broken_tag_recovery_8() {
+        let xml = "<root><broken a=//</root>";
+        test_broken(xml);
+    }
+    #[test]
+    fn broken_tag_recovery_9() {
+        let xml = "<root><broken a=<!</root>";
+        test_broken(xml);
+    }
+
+    fn test_broken_cdata(xml: &str, num_events: usize) {
+        let ev = events_from(xml);
+        assert_eq!(ev.len(), num_events);
+        match &ev[num_events - 1] {
+            Event::EndElement { accumulated, .. } => {
+                assert_eq!(
+                    String::from_utf8_lossy(accumulated),
+                    String::from_utf8_lossy(xml.as_bytes())
+                )
+            }
+            _ => panic!("expected EndElement"),
+        }
+    }
+
+    #[test]
+    fn broken_tag_recovery_10() {
+        let xml = "<root><![CDATA[incomplete</root>";
+        test_broken_cdata(xml, 2);
+    }
+
+    #[test]
+    fn cdata_accumulated_1() {
+        let xml = "<root><![CDATA[ASDF]]></root>";
+        test_broken_cdata(xml, 3);
     }
 
     #[test]
