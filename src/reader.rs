@@ -32,6 +32,9 @@ pub struct Reader<R: BufRead> {
     // NEW: synthetic end-tags for empty elements (<tag/>)
     pending_end: Vec<Vec<u8>>,
     accumulator: Vec<u8>,
+    /// Optional guard: maximum number of bytes to read while searching for CDATA terminator.
+    /// None => unlimited.
+    max_cdata_bytes: Option<usize>,
 }
 
 impl<R: BufRead> Reader<R> {
@@ -45,7 +48,13 @@ impl<R: BufRead> Reader<R> {
             finished: false,
             pending_end: Vec::new(),
             accumulator: Vec::new(),
+            max_cdata_bytes: None,
         }
+    }
+    /// Configure an optional maximum number of bytes to read while scanning for CDATA terminator.
+    /// Use None to disable the guard (default).
+    pub fn set_max_cdata_bytes(&mut self, limit: Option<usize>) {
+        self.max_cdata_bytes = limit;
     }
 
     fn get_accumulated(&mut self) -> Vec<u8> {
@@ -167,10 +176,11 @@ impl<R: BufRead> Reader<R> {
                                 self.state = State::OutsideTag;
                                 return Ok(Event::Comment(comment));
                             } else if self.try_consume(b"[CDATA[")? {
-                                let cdata = self.read_until_bytes(b"]]>")?;
+                                let cdata =
+                                    self.read_until_bytes_limited(b"]]>", self.max_cdata_bytes)?;
                                 self.accumulator.extend_from_slice(&cdata);
                                 self.state = State::OutsideTag;
-                                return Ok(Event::CData(cdata));
+                                return Ok(Event::CData(cdata.to_vec()));
                             } else {
                                 self.skip_until_byte(b'>')?;
                                 self.accumulator.push(b'>');
@@ -230,7 +240,95 @@ impl<R: BufRead> Reader<R> {
         }
     }
 
-    // === low-level helpers ===
+    fn read_until_bytes_limited(
+        &mut self,
+        pat: &[u8],
+        limit: Option<usize>,
+    ) -> io::Result<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut matched = 0usize;
+        let mut total = 0usize;
+
+        if pat.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // helper: advance until next '<' (leave pos at '<') collecting bytes into `out`
+        fn drain_until_lt<R: BufRead>(reader: &mut Reader<R>, out: &mut Vec<u8>) -> io::Result<()> {
+            loop {
+                reader.fill_buf()?;
+                // if we've hit EOF there's nothing more to find
+                if reader.finished {
+                    return Ok(());
+                }
+                while reader.pos < reader.end {
+                    let nb = reader.buf[reader.pos];
+                    if nb == b'<' {
+                        // leave pos pointing at '<' (do not consume)
+                        return Ok(());
+                    }
+                    out.push(nb);
+                    reader.pos += 1;
+                }
+            }
+        }
+
+        loop {
+            self.fill_buf()?;
+            if self.finished {
+                // try to collect until next '<' (best-effort) so accumulator reflects original bytes
+                drain_until_lt(self, &mut out)?;
+                self.accumulator.extend_from_slice(&out);
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("unterminated pattern {:?}", String::from_utf8_lossy(pat)),
+                ));
+            }
+
+            while self.pos < self.end {
+                let b = self.buf[self.pos];
+                self.pos += 1;
+                total = total.saturating_add(1);
+
+                if let Some(max) = limit {
+                    if total > max {
+                        // if we had a partial match, flush it to out
+                        if matched > 0 {
+                            out.extend_from_slice(&pat[..matched]);
+                        }
+                        // include the current byte and then drain until next '<'
+                        out.push(b);
+                        drain_until_lt(self, &mut out)?;
+                        // persist what we've collected and signal error so caller can recover
+                        self.accumulator.extend_from_slice(&out);
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "CDATA size limit exceeded",
+                        ));
+                    }
+                }
+
+                if b == pat[matched] {
+                    matched += 1;
+                    if matched == pat.len() {
+                        return Ok(out);
+                    }
+                } else {
+                    if matched > 0 {
+                        out.extend_from_slice(&pat[..matched]);
+                        matched = 0;
+                        if b == pat[0] {
+                            matched = 1;
+                        } else {
+                            out.push(b);
+                        }
+                    } else {
+                        out.push(b);
+                    }
+                }
+            }
+        }
+    }
 
     fn fill_buf(&mut self) -> io::Result<()> {
         if self.pos < self.end {
@@ -641,7 +739,18 @@ mod tests {
         test_broken(xml);
     }
 
-    fn test_broken_cdata(xml: &str, num_events: usize) {
+    #[test]
+    fn broken_tag_recovery_10() {
+        let xml = "<root><![CDATA[incomplete</root>";
+        let ev = events_from(xml);
+        // CDATA block is broken, so there should not be a CDATA event.
+        // But the parser should recover and still see start and end root.
+        assert_eq!(ev.len(), 2);
+        assert!(matches!(ev[0], Event::StartElement { .. }));
+        assert!(matches!(ev[2], Event::EndElement { .. }));
+    }
+
+    fn test_cdata(xml: &str, num_events: usize) {
         let ev = events_from(xml);
         assert_eq!(ev.len(), num_events);
         match &ev[num_events - 1] {
@@ -656,15 +765,9 @@ mod tests {
     }
 
     #[test]
-    fn broken_tag_recovery_10() {
-        let xml = "<root><![CDATA[incomplete</root>";
-        test_broken_cdata(xml, 2);
-    }
-
-    #[test]
     fn cdata_accumulated_1() {
         let xml = "<root><![CDATA[ASDF]]></root>";
-        test_broken_cdata(xml, 3);
+        test_cdata(xml, 3);
     }
 
     #[test]
