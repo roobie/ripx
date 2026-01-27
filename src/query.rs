@@ -193,3 +193,264 @@ pub fn run_query<R: BufRead, Q: Query>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reader::Event;
+    use std::io::{self, BufRead, Cursor};
+
+    // --- PathStack tests ---
+    #[test]
+    fn pathstack_push_pop_as_slice() {
+        let mut stack = PathStack::new();
+        assert_eq!(stack.as_slice(), &[] as &[String]);
+        stack.push("a");
+        stack.push("b");
+        assert_eq!(stack.as_slice(), &[String::from("a"), String::from("b")]);
+        stack.pop();
+        assert_eq!(stack.as_slice(), &[String::from("a")]);
+        stack.pop();
+        assert_eq!(stack.as_slice(), &[] as &[String]);
+        stack.pop(); // popping empty should not panic
+        assert_eq!(stack.as_slice(), <&[String]>::default());
+    }
+
+    // --- PathSelector tests ---
+    #[test]
+    fn pathselector_parse_and_match_anywhere() {
+        let sel = PathSelector::parse("//foo").unwrap();
+        assert!(matches!(sel, PathSelector::Anywhere(_)));
+        assert!(sel.matches_path(&["a".to_string()], "foo"));
+        assert!(!sel.matches_path(&["a".to_string()], "bar"));
+    }
+
+    #[test]
+    fn pathselector_parse_and_match_absolute() {
+        let sel = PathSelector::parse("/a/b/c").unwrap();
+        assert!(matches!(sel, PathSelector::Absolute(_)));
+        let path = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        assert!(sel.matches_path(&path, "c"));
+        assert!(!sel.matches_path(&["a".to_string(), "b".to_string()], "b"));
+    }
+
+    #[test]
+    fn pathselector_parse_bare_name() {
+        let sel = PathSelector::parse("foo").unwrap();
+        assert!(matches!(sel, PathSelector::Anywhere(_)));
+        assert!(sel.matches_path(&[], "foo"));
+    }
+
+    #[test]
+    fn pathselector_parse_errors() {
+        assert!(PathSelector::parse("//").is_err());
+        assert!(PathSelector::parse("/").is_err());
+    }
+
+    // --- PathQuery tests ---
+    #[test]
+    fn pathquery_basic_matching_and_max() {
+        let selector = PathSelector::parse("//foo").unwrap();
+        let mut pq = PathQuery::new(selector, 2);
+        // Simulate matching events
+        pq.on_start(&[], "foo", &[]);
+        pq.on_text(&[], "bar");
+        pq.on_end(&[], "foo", "foobar");
+        assert_eq!(pq.printed, 1);
+        pq.on_start(&[], "foo", &[]);
+        pq.on_end(&[], "foo", "foo");
+        assert_eq!(pq.printed, 2);
+        assert!(pq.is_done());
+    }
+
+    #[test]
+    fn pathquery_non_matching() {
+        let selector = PathSelector::parse("//foo").unwrap();
+        let mut pq = PathQuery::new(selector, 1);
+        pq.on_start(&[], "bar", &[]);
+        pq.on_text(&[], "baz");
+        pq.on_end(&[], "bar", "barbaz");
+        assert_eq!(pq.printed, 0);
+        assert!(!pq.is_done());
+    }
+
+    // --- Query trait callback order ---
+    struct MockQuery {
+        log: Vec<String>,
+        done: bool,
+    }
+    impl Query for MockQuery {
+        fn on_start(&mut self, path: &[String], name: &str, _attrs: &[(String, String)]) {
+            self.log.push(format!("start:{}:{:?}", name, path));
+        }
+        fn on_text(&mut self, _path: &[String], text: &str) {
+            self.log.push(format!("text:{}", text));
+        }
+        fn on_end(&mut self, path: &[String], name: &str, content: &str) {
+            self.log
+                .push(format!("end:{}:{:?}:{}", name, path, content));
+            if self.log.len() > 3 {
+                self.done = true;
+            }
+        }
+        fn is_done(&mut self) -> bool {
+            self.done
+        }
+    }
+
+        trait StubNextEvent {
+            fn next_event(&mut self) -> io::Result<Event>;
+        }
+
+    #[test]
+    fn run_query_dispatches_events_and_stops_on_done() {
+        // Minimal stub Reader emitting a fixed event sequence
+        struct StubReader {
+            events: Vec<Event>,
+            idx: usize,
+        }
+
+        impl StubNextEvent for StubReader {
+            fn next_event(&mut self) -> io::Result<Event> {
+                StubReader::next_event(self)
+            }
+        }
+        impl std::io::Read for StubReader {
+            fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+                Ok(0)
+            }
+        }
+        impl BufRead for StubReader {
+            fn fill_buf(&mut self) -> io::Result<&[u8]> {
+                Ok(&[])
+            }
+            fn consume(&mut self, _amt: usize) {}
+        }
+        impl StubReader {
+            fn next_event(&mut self) -> io::Result<Event> {
+                if self.idx < self.events.len() {
+                    let ev = self.events[self.idx].clone();
+                    self.idx += 1;
+                    Ok(ev)
+                } else {
+                    Ok(Event::Eof)
+                }
+            }
+        }
+        // Compose events: Start(foo), Text(bar), End(foo)
+        let events = vec![
+            Event::StartElement {
+                name: "foo".to_string(),
+                attributes: vec![],
+            },
+            Event::Text("bar".to_string()),
+            Event::EndElement {
+                name: "foo".to_string(),
+                accumulated: "foobar".to_string(),
+            },
+        ];
+        let mut reader = StubReader { events, idx: 0 };
+        let mut query = MockQuery {
+            log: vec![],
+            done: false,
+        };
+        // Patch run_query to use our stub
+        fn run_query_stub<Q: Query, R: StubNextEvent>(
+            reader: &mut R,
+            query: &mut Q,
+        ) -> io::Result<()> {
+            let mut path = PathStack::new();
+            loop {
+                if query.is_done() {
+                    break;
+                }
+                let ev = reader.next_event()?;
+                match ev {
+                    Event::StartElement { name, attributes } => {
+                        path.push(&name);
+                        query.on_start(path.as_slice(), &name, &attributes);
+                    }
+                    Event::EndElement { name, accumulated } => {
+                        query.on_end(path.as_slice(), &name, &accumulated);
+                        path.pop();
+                    }
+                    Event::Text(text) => {
+                        if !text.is_empty() {
+                            query.on_text(path.as_slice(), &text);
+                        }
+                    }
+                    Event::Comment(_) | Event::CData(_) => {}
+                    Event::Eof => {
+                        break;
+                    }
+                }
+            }
+            Ok(())
+        }
+        run_query_stub(&mut reader, &mut query).unwrap();
+        assert_eq!(query.log[0], "start:foo:[]");
+        assert_eq!(query.log[1], "text:bar");
+        assert!(query.log.iter().any(|l| l.starts_with("end:foo")));
+    }
+
+    // --- Edge cases ---
+    #[test]
+    fn run_query_empty_input() {
+        struct EmptyReader;
+        impl StubNextEvent for EmptyReader {
+            fn next_event(&mut self) -> io::Result<Event> {
+                Ok(Event::Eof)
+            }
+        }
+        impl std::io::Read for EmptyReader {
+            fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+                Ok(0)
+            }
+        }
+        impl BufRead for EmptyReader {
+            fn fill_buf(&mut self) -> io::Result<&[u8]> {
+                Ok(&[])
+            }
+            fn consume(&mut self, _amt: usize) {}
+        }
+        let mut reader = EmptyReader;
+        let mut query = MockQuery {
+            log: vec![],
+            done: false,
+        };
+        fn run_query_stub_1<Q: Query, R: StubNextEvent>(
+            reader: &mut R,
+            query: &mut Q,
+        ) -> io::Result<()> {
+            let mut path = PathStack::new();
+            loop {
+                if query.is_done() {
+                    break;
+                }
+                let ev = reader.next_event()?;
+                match ev {
+                    Event::StartElement { name, attributes } => {
+                        path.push(&name);
+                        query.on_start(path.as_slice(), &name, &attributes);
+                    }
+                    Event::EndElement { name, accumulated } => {
+                        query.on_end(path.as_slice(), &name, &accumulated);
+                        path.pop();
+                    }
+                    Event::Text(text) => {
+                        if !text.is_empty() {
+                            query.on_text(path.as_slice(), &text);
+                        }
+                    }
+                    Event::Comment(_) | Event::CData(_) => {}
+                    Event::Eof => {
+                        break;
+                    }
+                }
+            }
+            Ok(())
+        }
+        run_query_stub_1(&mut reader, &mut query).unwrap();
+        assert!(query.log.is_empty());
+    }
+}

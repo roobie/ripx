@@ -1,7 +1,7 @@
 use std::io::{self, BufRead};
 use std::mem;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Event {
     StartElement {
         name: String,
