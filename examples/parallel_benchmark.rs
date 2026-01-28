@@ -103,8 +103,6 @@ fn count_elements_single_threaded(
     let mut parser = Parser::new(reader, default_limits());
 
     let mut count = 0;
-    let mut depth = 0;
-    let mut in_target = false;
 
     loop {
         match parser.next_event() {
@@ -113,16 +111,8 @@ fn count_elements_single_threaded(
 
                 match event.event_type {
                     EventType::StartElement => {
-                        if depth == 0 && event.data == element_name {
-                            in_target = true;
-                        }
-                        depth += 1;
-                    }
-                    EventType::EndElement => {
-                        depth -= 1;
-                        if in_target && depth == 0 {
+                        if event.data == element_name {
                             count += 1;
-                            in_target = false;
                         }
                     }
                     EventType::Eof => break,
@@ -168,8 +158,6 @@ fn count_elements_parallel(file_path: &str, element_name: &[u8]) -> std::io::Res
     let chunk_counts = processor.process_file(Path::new(file_path), |chunk| {
         let mut parser = SliceParser::new(chunk.data, default_limits());
         let mut count = 0;
-        let mut depth = 0;
-        let mut in_target = false;
 
         loop {
             match parser.next_event() {
@@ -178,16 +166,8 @@ fn count_elements_parallel(file_path: &str, element_name: &[u8]) -> std::io::Res
 
                     match event.event_type {
                         EventType::StartElement => {
-                            if depth == 0 && event.data == element_name {
-                                in_target = true;
-                            }
-                            depth += 1;
-                        }
-                        EventType::EndElement => {
-                            depth -= 1;
-                            if in_target && depth == 0 {
+                            if event.data == element_name {
                                 count += 1;
-                                in_target = false;
                             }
                         }
                         _ => {}
