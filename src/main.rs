@@ -48,7 +48,7 @@ fn main() -> std::io::Result<()> {
                     write_event_to_buffer(&ev, &mut output_buffer, &mut temp_buf);
                     depth_in_match += 1;
                 } else if ev.data == element_name_bytes {
-                    if let Some((k,v)) = ev.attributes.get(0) {
+                    if let Some((k, v)) = ev.attributes.get(0) {
                         if k == b"id" && v == b"20121624" {
                             // New match found
                             depth_in_match = 1;

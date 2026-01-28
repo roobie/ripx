@@ -4,8 +4,8 @@ use crate::element_stack::ElementStack;
 use crate::input_buffer::InputBuffer;
 use crate::scratch::ScratchBuffers;
 use crate::tokenizer::scan_name;
-use std::io;
 use memchr;
+use std::io;
 
 /// Public parser limits (see ParserV2.md)
 #[derive(Debug, Clone)]
