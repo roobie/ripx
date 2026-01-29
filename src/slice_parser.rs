@@ -7,8 +7,8 @@ use crate::attributes::{AttributeTable, Attributes};
 use crate::element_stack::{ElementFrame, ElementStack};
 use crate::parser::{ErrorCode, EventType, ParserLimits};
 use crate::scratch::ScratchBuffers;
+use crate::simd_scanner::SimdScanner;
 use crate::tokenizer::scan_name;
-use memchr;
 
 /// Event returned by the slice parser.
 ///
@@ -134,8 +134,8 @@ impl<'data> SliceParser<'data> {
             return Err(ParseError::Eof);
         }
 
-        // Find next '<'
-        if let Some(i) = memchr::memchr(b'<', buf) {
+        // Find next '<' using SIMD-accelerated search
+        if let Some(i) = SimdScanner::find_xml_structural_char(buf) {
             if i > 0 {
                 // Emit text before tag
                 self.scratch.text.clear();
@@ -184,7 +184,7 @@ impl<'data> SliceParser<'data> {
                         self.parse_cdata()
                     } else {
                         // Skip unknown declarations (DOCTYPE, etc.)
-                        if let Some(close) = memchr::memchr(b'>', &buf[2..]) {
+                        if let Some(close) = SimdScanner::find_tag_close(&buf[2..]) {
                             self.consume(2 + close + 1);
                             self.next_event()
                         } else {
@@ -229,7 +229,7 @@ impl<'data> SliceParser<'data> {
         let rest = &buf[2..];
         let (nlen, _delim) = scan_name(rest, self.limits.max_name_len);
 
-        if let Some(gt) = memchr::memchr(b'>', rest) {
+        if let Some(gt) = SimdScanner::find_tag_close(rest) {
             let end_name = &rest[..nlen];
             let consumed = 2 + gt + 1;
 
@@ -311,8 +311,8 @@ impl<'data> SliceParser<'data> {
         let rest = &buf[1..];
         let (name_len, _delim) = scan_name(rest, self.limits.max_name_len);
 
-        // Find end of tag
-        if let Some(gt_pos) = memchr::memchr(b'>', rest) {
+        // Find end of tag using SIMD-accelerated search
+        if let Some(gt_pos) = SimdScanner::find_tag_close(rest) {
             let self_closing = rest[gt_pos.saturating_sub(1)] == b'/';
             let consumed = 1 + gt_pos + 1;
 
