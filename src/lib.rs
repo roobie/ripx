@@ -9,6 +9,7 @@ pub mod slice_parser;
 pub mod arena_parser;
 pub mod event;
 pub mod simd_scanner;
+pub mod filter;
 
 // Core parser internals (kept private; tests may access via `pub(crate)` as needed)
 mod attributes;

@@ -9,7 +9,7 @@ rayon = "1.11.0"
 memmap2 = "0.9"
 bumpalo = "3.14"
 smallvec = "1.11"
-crossbeam = "0.8.4"
+crossbeam = { version = "0.8.4", features = ["crossbeam-queue"] }
 
 [dev-dependencies]
 criterion = "0.8.1"

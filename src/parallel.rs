@@ -139,7 +139,10 @@ impl ParallelProcessor {
     /// Parse an XML file in parallel and collect all events from matching elements.
     ///
     /// This is a convenience method that handles the common case of filtering
-    /// for specific elements.
+    /// for specific elements. Use this when you need a custom predicate over
+    /// element names — it uses the SliceParser and is robust but not the fastest
+    /// option. For an optimized fast-path for equality by element name, see
+    /// `filter_elements_by_name`.
     ///
     /// # Arguments
     ///
@@ -210,6 +213,74 @@ impl ParallelProcessor {
         })
     }
 
+    /// Fast-path: filter by exact element name using the FilteringParser.
+    ///
+    /// This function is optimized for equality matching of element names and uses
+    /// the fast FilteringParser per chunk to quickly skip non-matching regions.
+    pub fn filter_elements_by_name(&self, path: &Path, name: &str) -> io::Result<Vec<Vec<u8>>> {
+        // Memory-map the file
+        let file = File::open(path)?;
+        let mmap = unsafe { Mmap::map(&file)? };
+
+        // Split into chunks
+        let chunks = self.splitter.split(&mmap[..]);
+
+        // Per-chunk processing returns io::Result<Vec<Vec<u8>>>
+        let results: Vec<io::Result<Vec<Vec<u8>>>> = if let Some(num_threads) = self.config.num_threads {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build()
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+                .install(|| {
+                    chunks
+                        .par_iter()
+                        .map(|chunk| {
+                            // create a cursor over the chunk data
+                            let cursor = std::io::Cursor::new(chunk.data);
+                            let mut fp = crate::filter::FilteringParser::new(cursor, name);
+                            let mut matches: Vec<Vec<u8>> = Vec::new();
+                            loop {
+                                match fp.next_match() {
+                                    Ok(Some(el)) => matches.push(el),
+                                    Ok(None) => break,
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            Ok(matches)
+                        })
+                        .collect()
+                })
+        } else {
+            chunks
+                .par_iter()
+                .map(|chunk| {
+                    let cursor = std::io::Cursor::new(chunk.data);
+                    let mut fp = crate::filter::FilteringParser::new(cursor, name);
+                    let mut matches: Vec<Vec<u8>> = Vec::new();
+                    loop {
+                        match fp.next_match() {
+                            Ok(Some(el)) => matches.push(el),
+                            Ok(None) => break,
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    Ok(matches)
+                })
+                .collect()
+        };
+
+        // Combine results, propagating the first error if any
+        let mut combined: Vec<Vec<u8>> = Vec::new();
+        for r in results.into_iter() {
+            match r {
+                Ok(mut v) => combined.append(&mut v),
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(combined)
+    }
+
     /// Get a reference to the configuration.
     pub fn config(&self) -> &ParallelConfig {
         &self.config
@@ -255,7 +326,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: SliceParser needs complete attribute parsing implementation
     fn test_filter_elements() -> io::Result<()> {
         // Create a temporary XML file
         let mut temp_file = NamedTempFile::new()?;
@@ -265,8 +335,8 @@ mod tests {
 
         let processor = ParallelProcessor::new();
 
-        // Filter for "item" elements
-        let matches = processor.filter_elements(temp_file.path(), |name| name == b"item")?;
+        // Filter for "item" elements using fast-path
+        let matches = processor.filter_elements_by_name(temp_file.path(), "item")?;
 
         // Should find 2 items
         assert_eq!(matches.len(), 2);
