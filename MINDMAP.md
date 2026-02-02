@@ -31,11 +31,13 @@
 
 [16] **Project PLAN** - High-level roadmap and milestones complementing the Performance Plan. Use for scheduling, bean creation, and coordinating phases. [PLAN.md][11]
 
-[17] **Improvements Checklist (1-2 GB/s)** - Actionable checklist created during Phase 2 completion work; tracks tasks to reach 1-2 GB/s. Items updated as work progressed (many Phase 2 items now checked). Use for incremental progress and task assignment. [IMPROVEMENTS_FOR_1_2_GBPS.md][13]
+[17] **Improvements Checklist (1-2 GB/s)** - Actionable checklist created during Phase 2 completion work; tracks tasks to reach 1-2 GB/s. Items updated as work progressed (many Phase 2 items now checked). Phase 3 fast-path work has started: a Filtering fast-path (FilteringParser) was implemented and integrated with the parallel processor to speed up equality-based element filtering. See details in [src/filter.rs] and parallel integration in [src/parallel.rs]. Use for incremental progress and task assignment. [IMPROVEMENTS_FOR_1_2_GBPS.md][13]
 
 [18] **Mind Map Format Doc** - This file (MINDMAP.md) defines the mindmap format and agent rules. All mindmap data must be stored here per repo policy. Read this before editing the map. [MINDMAP.md]
 
 [19] **Documentation Conversion Policy** - All repository .md files are consolidated into this MINDMAP.md. When docs change, update corresponding node(s) here and keep original files for full content. Use node references to point to original files when preserving full text is desired. [IMPROVEMENTS_FOR_1_2_GBPS.md][10]
+
+[20] **Filtering Fast-Path (FilteringParser)** - Implemented fast single-pass element equality filter to accelerate selective queries. Components: `src/filter.rs` (FilteringScanner, FilteringParser) and crate export; `ParallelProcessor::filter_elements_by_name` in `src/parallel.rs` runs a FilteringParser per chunk in parallel and aggregates results. Current notes: returns owned Vec<u8> copies; chunk overlap may cause duplicate matches (deduplication task remains); next steps: dedupe overlap results, add zero-copy callback API, integrate streaming output. See improvements checklist [17] and plan [IMPROVEMENTS_FOR_1_2_GBPS.md][13].
 
 
 ---
