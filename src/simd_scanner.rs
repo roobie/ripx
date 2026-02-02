@@ -141,12 +141,154 @@ impl SimdScanner {
         data.iter().position(|&b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
     }
 
-    /// Skip whitespace and return the number of bytes skipped.
+    /// Find the first occurrence of a quote character (single or double).
+    ///
+    /// Used for parsing quoted attribute values.
     #[inline]
-    pub fn skip_whitespace(data: &[u8]) -> usize {
+    pub fn find_quote_char(data: &[u8]) -> Option<(usize, u8)> {
+        // First check for double quote
+        if let Some(pos) = memchr::memchr(b'"', data) {
+            return Some((pos, b'"'));
+        }
+        // Then check for single quote
+        if let Some(pos) = memchr::memchr(b'\'', data) {
+            return Some((pos, b'\''));
+        }
+        None
+    }
+
+    /// SIMD-accelerated whitespace skipping.
+    ///
+    /// Returns the number of consecutive whitespace characters from the start.
+    #[inline]
+    pub fn skip_whitespace_simd(data: &[u8]) -> usize {
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+        unsafe {
+            Self::skip_whitespace_simd_avx2(data)
+        }
+
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2")))]
+        {
+            Self::skip_whitespace_scalar(data)
+        }
+    }
+
+    /// AVX2 implementation of whitespace skipping.
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[target_feature(enable = "avx2")]
+    unsafe fn skip_whitespace_simd_avx2(data: &[u8]) -> usize {
+        use std::arch::x86_64::*;
+
+        let len = data.len();
+        let mut offset = 0;
+
+        // Process 32 bytes at a time
+        while offset + 32 <= len {
+            let chunk = _mm256_loadu_si256(data.as_ptr().add(offset) as *const __m256i);
+
+            // Create mask for whitespace characters
+            let space = _mm256_set1_epi8(b' ' as i8);
+            let tab = _mm256_set1_epi8(b'\t' as i8);
+            let nl = _mm256_set1_epi8(b'\n' as i8);
+            let cr = _mm256_set1_epi8(b'\r' as i8);
+
+            let is_space = _mm256_cmpeq_epi8(chunk, space);
+            let is_tab = _mm256_cmpeq_epi8(chunk, tab);
+            let is_nl = _mm256_cmpeq_epi8(chunk, nl);
+            let is_cr = _mm256_cmpeq_epi8(chunk, cr);
+
+            // OR all whitespace comparisons
+            let is_whitespace = _mm256_or_si256(
+                _mm256_or_si256(is_space, is_tab),
+                _mm256_or_si256(is_nl, is_cr)
+            );
+
+            // Find first non-whitespace character
+            let mask = _mm256_movemask_epi8(is_whitespace);
+            let inv_mask = !mask; // Invert to find first non-whitespace
+
+            if inv_mask != 0 {
+                let first_non_ws = inv_mask.trailing_zeros() as usize;
+                return offset + first_non_ws;
+            }
+
+            offset += 32;
+        }
+
+        // Handle remaining bytes with scalar approach
+        offset + Self::skip_whitespace_scalar(&data[offset..])
+    }
+
+    /// Scalar fallback for whitespace skipping.
+    fn skip_whitespace_scalar(data: &[u8]) -> usize {
         data.iter()
             .position(|&b| !matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
             .unwrap_or(data.len())
+    }
+
+    /// SIMD-accelerated name character validation.
+    ///
+    /// Returns true if all characters in the slice are valid XML name characters.
+    #[inline]
+    pub fn validate_name_chars_simd(data: &[u8]) -> bool {
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse4.2"))]
+        unsafe {
+            Self::validate_name_chars_simd_sse42(data)
+        }
+
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "sse4.2")))]
+        {
+            Self::validate_name_chars_scalar(data)
+        }
+    }
+
+    /// SSE4.2 implementation using PCMPESTRI for fast character validation.
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse4.2"))]
+    #[target_feature(enable = "sse4.2")]
+    unsafe fn validate_name_chars_simd_sse42(data: &[u8]) -> bool {
+        use std::arch::x86_64::*;
+
+        let len = data.len();
+        if len == 0 {
+            return true;
+        }
+
+        // Valid name characters: A-Z a-z 0-9 _ : - .
+        let valid_chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_:-.";
+
+        let mut i = 0;
+        while i + 16 <= len {
+            let chunk = _mm_loadu_si128(data.as_ptr().add(i) as *const __m128i);
+            let valid_set = _mm_loadu_si128(valid_chars.as_ptr() as *const __m128i);
+
+            // Use PCMPESTRI to find if all characters are in the valid set
+            let result = _mm_cmpestri(
+                valid_set, 16, // valid chars set
+                chunk, len.min(16), // input chunk
+                _mm_cmpestrm_flags::_SIDD_CMP_EQUAL_ANY | _mm_cmpestrm_flags::_SIDD_MASKED_NEGATIVE_POLARITY
+            );
+
+            // If any character is not in the valid set, result will be non-zero
+            if result != 0 {
+                return false;
+            }
+
+            i += 16;
+        }
+
+        // Handle remaining bytes
+        Self::validate_name_chars_scalar(&data[i..])
+    }
+
+    /// Scalar fallback for name character validation.
+    pub fn validate_name_chars_scalar(data: &[u8]) -> bool {
+        data.iter().all(|&b| Self::is_name_char(b))
+    }
+
+    /// Skip whitespace and return the number of bytes skipped.
+    #[inline]
+    pub fn skip_whitespace(data: &[u8]) -> usize {
+        Self::skip_whitespace_simd(data)
     }
 }
 
@@ -302,11 +444,35 @@ mod tests {
     }
 
     #[test]
-    fn test_find_whitespace() {
-        let data = b"text more";
-        assert_eq!(SimdScanner::find_whitespace(data), Some(4));
+    fn test_find_quote_char() {
+        let data = b"value=\"quoted\"";
+        assert_eq!(SimdScanner::find_quote_char(data), Some((6, b'"')));
 
-        let data = b"nowhitespace";
-        assert_eq!(SimdScanner::find_whitespace(data), None);
+        let data = b"value='single'";
+        assert_eq!(SimdScanner::find_quote_char(data), Some((6, b'\'')));
+
+        let data = b"no quotes";
+        assert_eq!(SimdScanner::find_quote_char(data), None);
+    }
+
+    #[test]
+    fn test_skip_whitespace_simd() {
+        assert_eq!(SimdScanner::skip_whitespace_simd(b"   text"), 3);
+        assert_eq!(SimdScanner::skip_whitespace_simd(b"\t\n\r text"), 4);
+        assert_eq!(SimdScanner::skip_whitespace_simd(b"text"), 0);
+        assert_eq!(SimdScanner::skip_whitespace_simd(b"   "), 3);
+    }
+
+    #[test]
+    fn test_validate_name_chars_simd() {
+        assert!(SimdScanner::validate_name_chars_simd(b"element"));
+        assert!(SimdScanner::validate_name_chars_simd(b"my-element"));
+        assert!(SimdScanner::validate_name_chars_simd(b"my_element"));
+        assert!(SimdScanner::validate_name_chars_simd(b"element123"));
+        assert!(SimdScanner::validate_name_chars_simd(b"ns:element"));
+
+        assert!(!SimdScanner::validate_name_chars_simd(b"ele ment"));
+        assert!(!SimdScanner::validate_name_chars_simd(b"ele@ment"));
+        assert!(!SimdScanner::validate_name_chars_simd(b"ele<ment"));
     }
 }

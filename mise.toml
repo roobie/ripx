@@ -63,3 +63,6 @@ run = "cargo publish --workspace"
 description = "Build, test, and install"
 depends = ["build", "test", "install"]
 run = "echo 'All tasks completed'"
+
+[tasks.bench]
+run = "cargo run --release --example parallel_benchmark -- testing/local/small.xml relation"

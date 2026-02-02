@@ -146,6 +146,11 @@ pub fn consume_pi(haystack: &[u8]) -> Option<usize> {
     find_pi_end(haystack).map(|idx| idx + 2)
 }
 
+/// Check if a byte slice contains XML entity references (&...;).
+pub fn contains_entities(data: &[u8]) -> bool {
+    data.contains(&b'&')
+}
+
 /// A simple attribute parser for use in tokenizer unit tests.
 /// Parses consecutive attribute `name=value` pairs from `buf` until a `>` or `/>`
 /// is encountered or limits are reached. Returns the parsed attributes as a
